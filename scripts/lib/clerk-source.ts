@@ -1,0 +1,88 @@
+/**
+ * Clerk as a migration *source*: seeding a Clerk instance, emptying it, and
+ * changing its config through the CLI. Shared by seed-clerk.ts and
+ * variations/clerk.ts.
+ */
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { createClerkClient } from "@clerk/backend";
+import { run } from "./run";
+import { pool, withRetry, type SeedUser } from "./users";
+
+/** The dev instance that is both source and destination for Stage 7. */
+export const SOURCE = { app: "app_3HYFnu4WUmQ1p5DS301lefhySiO", instance: "ins_3HYFnwsybLbCpZ3iqN5yt4odmrx" };
+
+const CLI = join(homedir(), "clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts");
+
+export const clerkClient = () => createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+
+/** A fixed TOTP secret and backup codes, so an MFA user is reproducible. */
+export const TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+export const BACKUP_CODES = ["mt-backup-0001", "mt-backup-0002", "mt-backup-0003"];
+
+/** ada.lovelace4@example.com -> ada.lovelace4+clerk_test@example.com */
+export function testEmail(email: string) {
+  const [local, domain] = email.split("@");
+  return `${local}+clerk_test@${domain}`;
+}
+
+/** Clerk usernames must be 4-64 chars of letters, digits, _ or -. */
+export function clerkUsername(username: string | null) {
+  if (!username) return undefined;
+  const cleaned = username.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return cleaned.length >= 4 ? cleaned.slice(0, 64) : undefined;
+}
+
+export async function createSeedUser(u: SeedUser, seedPassword: string) {
+  const clerk = clerkClient();
+  const user = await clerk.users.createUser({
+    externalId: u.id,
+    emailAddress: u.email ? [testEmail(u.email)] : undefined,
+    phoneNumber: u.phone ? [u.phone] : undefined,
+    username: clerkUsername(u.username),
+    firstName: u.firstName ?? undefined,
+    lastName: u.lastName ?? undefined,
+    password: u.hasPassword ? seedPassword : undefined,
+    // The seed password is strong, but every user shares it — skip the
+    // breach check rather than have 425 identical passwords rejected.
+    skipPasswordChecks: u.hasPassword ? true : undefined,
+    skipPasswordRequirement: u.hasPassword ? undefined : true,
+    // Needs authenticator_app + backup_code on (variations/clerk.ts C5).
+    ...(u.mfa && { totpSecret: TOTP_SECRET, backupCodes: BACKUP_CODES }),
+    publicMetadata: u.metadata?.public,
+    privateMetadata: u.metadata?.app,
+    unsafeMetadata: u.metadata?.user,
+  });
+  // Retried on its own: a 429 here must not make the caller's retry re-create
+  // a user that already exists.
+  if (u.banned) await withRetry(() => clerk.users.banUser(user.id), 8);
+  return user;
+}
+
+/** Deletes every user in the instance. Only ever pointed at the test instance. */
+export async function deleteAllUsers() {
+  const clerk = clerkClient();
+  for (;;) {
+    const { data } = await withRetry(() => clerk.users.getUserList({ limit: 100 }), 8);
+    if (!data.length) return;
+    const failures = await pool(data, 4, async (u) => void (await clerk.users.deleteUser(u.id)));
+    if (failures.length) throw new Error(`${failures.length} users could not be deleted: ${String(failures[0].error)}`);
+  }
+}
+
+const cli = (args: string[]) =>
+  run("bun", [CLI, "config", ...args, "--app", SOURCE.app, "--instance", SOURCE.instance], {
+    ...process.env,
+    CLERK_TELEMETRY_DISABLED: "1",
+  });
+
+export async function configPull(): Promise<Record<string, unknown>> {
+  const { code, stdout, stderr } = await cli(["pull"]);
+  if (code !== 0) throw new Error(`clerk config pull exited ${code}: ${stderr.slice(-300)}`);
+  return JSON.parse(stdout);
+}
+
+export async function configPatch(body: object) {
+  const { code, stderr } = await cli(["patch", "--json", JSON.stringify(body), "--yes"]);
+  if (code !== 0) throw new Error(`clerk config patch exited ${code}: ${stderr.slice(-300)}`);
+}

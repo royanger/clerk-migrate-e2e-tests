@@ -1,0 +1,33 @@
+{
+  "name": "migration-test-apps",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "generate:users": "tsx scripts/generate-users.ts",
+    "generate:users:10k": "tsx scripts/generate-users.ts --count 10000 --out data/users-10k.json",
+    "seed": "op run --env-file=op.env -- tsx scripts/seed.ts",
+    "reset": "op run --env-file=op.env -- tsx scripts/reset.ts",
+    "teardown": "tsx scripts/teardown.ts",
+    "check:env": "op run --env-file=op.env -- tsx scripts/check-env.ts",
+    "supabase:sql": "op run --env-file=op.env -- tsx scripts/supabase-sql.ts",
+    "db:tables": "op run --env-file=op.env -- tsx scripts/db-tables.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:migrate": "op run --env-file=op.env -- tsx scripts/test-migrate.ts"
+  },
+  "devDependencies": {
+    "@clerk/backend": "^3.17.0",
+    "@faker-js/faker": "^10.6.0",
+    "@libsql/client": "^0.18.0",
+    "@supabase/supabase-js": "^2.112.4",
+    "@types/bcryptjs": "^3.0.0",
+    "@types/node": "^26.4.1",
+    "@workos-inc/node": "^10.13.0",
+    "bcryptjs": "^3.0.3",
+    "better-auth": "^1.7.2",
+    "firebase-admin": "^13.10.0",
+    "libphonenumber-js": "^1.13.14",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,10 @@
+allowBuilds:
+  '@clerk/shared': true
+  '@firebase/util': true
+  better-sqlite3: false
+  esbuild: true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@libsql/client@0.18.0'
+  - '@libsql/core@0.18.0'

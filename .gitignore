@@ -1,0 +1,6 @@
+node_modules
+.env
+*.sqlite
+.DS_Store
+test-results
+clerk-runs
