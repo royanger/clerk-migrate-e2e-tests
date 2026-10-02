@@ -274,6 +274,7 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
   mkdirSync(dir, { recursive: true });
   const runsDir = ["--runs-dir", clerkRunsDir];
   let importRun: string | undefined;
+  let preCreated: string[] = [];
 
   try {
     // Guard: the destination has to start empty, or the counts mean nothing.
@@ -316,14 +317,22 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     await patchDest(DESTS[dest]);
     const exportRun = exp.json.run.id as string;
     row.exportRun = exportRun;
-    const dry = await cli(["migrate", "import", exportRun, "--dry-run", "--allow-partial", "--json", ...target, ...runsDir]);
+    preCreated = (await v.beforeImport?.(clerk, seeded)) ?? [];
+    const extra = v.importArgs ?? [];
+    const dry = await cli(["migrate", "import", exportRun, "--dry-run", "--allow-partial", ...extra, "--json", ...target, ...runsDir]);
     writeFileSync(join(dir, "dry-run.json"), JSON.stringify(dry.json, null, 2));
     if (!dry.json?.checks) throw new Error(`dry run exited ${dry.code} with no checks`);
     row.predicted = dry.json.checks.importable;
+    if (v.expectChecks) {
+      const exported = JSON.parse(readFileSync(join(clerkRunsDir, exportRun, "export.json"), "utf8")).users as Record<string, unknown>[];
+      const byId = new Map(exported.map((r) => [String(r.user_id ?? r.id ?? r.localId ?? r.uid), r]));
+      const rejected = (dry.json.checks.rejects as { sourceId: string; reason: string }[]).map((r) => ({ ...r, row: byId.get(r.sourceId) }));
+      row.notes.push(...v.expectChecks(dry.json.checks, rejected, seeded, dest, exported).map((n) => `dry run: ${n}`));
+    }
 
     // 7. Import.
     const started = Date.now();
-    const imp = await cli(["migrate", "import", exportRun, "--yes", "--allow-partial", "--json", ...target, ...runsDir]);
+    const imp = await cli(["migrate", "import", exportRun, "--yes", "--allow-partial", ...extra, "--json", ...target, ...runsDir]);
     row.importSeconds = Math.round((Date.now() - started) / 1000);
     writeFileSync(join(dir, "import.json"), JSON.stringify(imp.json, null, 2));
     importRun = imp.json?.run?.id;
@@ -340,8 +349,17 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     if (row.failed) row.notes.push(`${row.failed} failed: ${JSON.stringify(imp.json.result.errors)}`);
     // The listing lags creates the same way the count lags deletes (F6 once
     // listed 8 of 10 straight after the import): wait for it to catch up.
-    await settledCount(60_000, row.created ?? 0);
-    const users = await clerkUsers();
+    // The count can catch up before the listing does (B7 once counted 40 but
+    // listed 38): wait for the listing itself, not just the count.
+    const expectedInClerk = (row.created ?? 0) + preCreated.length;
+    await settledCount(60_000, expectedInClerk);
+    let listed = await clerkUsers();
+    for (let i = 0; listed.length !== expectedInClerk && i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      listed = await clerkUsers();
+    }
+    // Users the variation put there itself (collision targets) aren't the import's.
+    const users = listed.filter((u) => !preCreated.includes(u.id));
     const summary = summarize(users);
     writeFileSync(join(dir, "clerk-summary.json"), JSON.stringify(summary, null, 2));
     if (summary.total !== row.created) row.notes.push(`Clerk holds ${summary.total}, import said ${row.created}`);
@@ -349,6 +367,14 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     const pw = await verifyPasswords(users);
     row.passwords = `${pw.checked - pw.failed.length}/${pw.checked}`;
     if (pw.failed.length) row.notes.push(`${pw.failed.length} passwords did not verify`);
+
+    if (v.reimport) {
+      const again = await cli(["migrate", "import", exportRun, "--yes", "--allow-partial", ...extra, "--json", ...target, ...runsDir]);
+      if (again.code !== 0 || !again.json?.alreadyImported)
+        row.notes.push(`re-import: expected "already imported", got exit ${again.code} ${JSON.stringify(again.json?.result ?? again.json?.error ?? {}).slice(0, 120)}`);
+      const after = await settledCount(15_000, users.length + preCreated.length);
+      if (after !== users.length + preCreated.length) row.notes.push(`re-import changed the instance: ${users.length + preCreated.length} → ${after} users`);
+    }
 
     if (row.notes.length) row.status = "fail";
     if (row.status === "fail" && exp.json?.run) row.notes.push(`export run ${exp.json.run.id}`);
@@ -371,6 +397,9 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
         undo = await cli(undoArgs);
       }
       if (undo.code !== 0) row.notes.push(`undo exited ${undo.code}`);
+    }
+    for (const id of preCreated) await withRetry(() => clerk.users.deleteUser(id), 8).catch(() => row.notes.push(`could not delete pre-created ${id}`));
+    if (importRun || preCreated.length) {
       const left = await settledCount().catch(() => -1);
       if (left !== 0) row.notes.push(`!! ${left} users still in the instance after undo`);
     }

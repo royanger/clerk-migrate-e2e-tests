@@ -10,7 +10,8 @@ import { createClient } from "@libsql/client";
 import { APP_PLUGINS, clearRows, recreateSchema, type SchemaOptions } from "../lib/better-auth-schema";
 import { run } from "../lib/run";
 import type { SeedUser } from "../lib/users";
-import { everyNth, expectAllLanded, expectLanded, type Variation } from "../lib/variations";
+import type { DestId } from "../lib/clerk-dest";
+import { everyNth, expectAllLanded, expectLanded, expectRejected, type Variation } from "../lib/variations";
 
 /**
  * A fresh client per step. One long-lived client sits idle through the seed and
@@ -36,8 +37,19 @@ export async function afterAll() {
 }
 
 const withEmail = (all: SeedUser[]) => all.filter((u) => u.email);
-/** Neither identifier exists without its plugin. */
-const core = { withUsername: 0, withPhone: 0 };
+/**
+ * Neither identifier exists without its plugin. Without the phone plugin a
+ * phone-only user's only identifier is the @phone.local placeholder Clerk
+ * refuses, so the CLI rejects them in the dry run (cli-bugs #10, a33767f6).
+ */
+const withRealEmail = (seeded: SeedUser[]) => seeded.filter((u) => u.email).length;
+const core = {
+  withUsername: 0,
+  withPhone: 0,
+  total: withRealEmail,
+  // Banned phone-only users are among those rejected.
+  banned: (seeded: SeedUser[]) => seeded.filter((u) => u.banned && u.email).length,
+};
 
 export const variations: Variation[] = [
   {
@@ -82,7 +94,8 @@ export const variations: Variation[] = [
     describe: "+ username plugin",
     sourceConfig: schema({ plugins: ["username"] }),
     users: everyNth(5),
-    expect: expectLanded({ withPhone: 0 }),
+    // A phone-only user with a username still has an identifier, so it lands.
+    expect: expectLanded({ withPhone: 0, total: (seeded) => seeded.filter((u) => u.email || u.username).length }),
   },
   {
     id: "B3",
@@ -141,7 +154,7 @@ export const variations: Variation[] = [
     // Guests are throwaway accounts: only the real users should land.
     expect: expectLanded({
       ...core,
-      total: (seeded) => seeded.filter((u) => !u.anonymous).length,
+      total: (seeded) => seeded.filter((u) => !u.anonymous && u.email).length,
       withPassword: (seeded) => seeded.filter((u) => !u.anonymous && u.hasPassword).length,
     }),
   },
@@ -159,6 +172,10 @@ export const variations: Variation[] = [
         ...(u.hasPassword && i % 9 === 3 && { passwordFormat: "bcrypt" as const }),
       })),
     expect: expectAllLanded,
+    // Exactly the users each dest must refuse, and for what (not just "the
+    // dry run agreed with the import").
+    expectChecks: (_checks, rejected, _seeded, dest, exported) =>
+      expectRejected(rejected, exported, (r) => String(r.user_id), (r) => B9_REJECTS[dest](r)),
   },
   {
     id: "B10",
@@ -166,6 +183,77 @@ export const variations: Variation[] = [
     sourceConfig: schema({ userTable: "users" }),
     users: everyNth(10),
     expectExportFailure: true,
+  },
+  // ── Deliberate failures: what the CLI must refuse, warn about, or leave alone ──
+  {
+    id: "X1",
+    describe: "password required (D2), half the users have none: imported anyway, with a warning",
+    dests: ["D2"],
+    sourceConfig: APP_SCHEMA,
+    users: (all) => plain(all).slice(0, 20).map((u, i) => ({ ...u, hasPassword: i % 2 === 0 })),
+    // The CLI creates them with skip_password_requirement; they reset it to sign in.
+    expectChecks: (checks) => [
+      ...(checks.rejects.length ? [`${checks.rejects.length} rejected, expected none`] : []),
+      ...(checks.warnings.some((w) => /without a password, which this instance requires/.test(w))
+        ? []
+        : ['no "without a password, which this instance requires" warning']),
+    ],
+    expect: (clerk, seeded) => counts(clerk, { total: seeded.length, withPassword: seeded.filter((u) => u.hasPassword).length }),
+  },
+  {
+    id: "X2",
+    describe: "--require-password: users without one are left out",
+    sourceConfig: APP_SCHEMA,
+    importArgs: ["--require-password"],
+    users: (all) => plain(all).slice(0, 20).map((u, i) => ({ ...u, hasPassword: i % 2 === 0 })),
+    expect: (clerk, seeded) => {
+      const n = seeded.filter((u) => u.hasPassword).length;
+      return counts(clerk, { total: n, withPassword: n });
+    },
+  },
+  {
+    id: "X3",
+    describe: "already in Clerk: an email, a phone and a username taken by existing users",
+    sourceConfig: APP_SCHEMA,
+    users: (all) => [...collidable(all).slice(0, 3), ...plain(all).slice(0, 3)],
+    beforeImport: async (clerk, seeded) => {
+      const [a, b, c] = seeded;
+      const made = [
+        await clerk.users.createUser({ emailAddress: [a.email!], skipPasswordRequirement: true }),
+        await clerk.users.createUser({ phoneNumber: [b.phone!], emailAddress: ["x3-phone+clerk_test@example.com"], skipPasswordRequirement: true }),
+        await clerk.users.createUser({ username: c.username!, emailAddress: ["x3-username+clerk_test@example.com"], skipPasswordRequirement: true }),
+      ];
+      return made.map((u) => u.id);
+    },
+    expectChecks: (_checks, rejected, seeded, _dest, exported) => {
+      const [a, b, c] = seeded;
+      return expectRejected(rejected, exported, (r) => String(r.user_id), (r) =>
+        r.email === a.email ? /email is already used/ : r.phone_number === b.phone ? /phone number is already used/ : r.username === c.username ? /username is already taken/ : null,
+      );
+    },
+    expect: (clerk, seeded) => counts(clerk, { total: seeded.length - 3 }),
+  },
+  {
+    id: "X4",
+    describe: "over the dev instance's 100-user limit: 1 user already there, 100 to import",
+    sourceConfig: APP_SCHEMA,
+    users: everyNth(5),
+    beforeImport: async (clerk) => [
+      (await clerk.users.createUser({ emailAddress: ["x4-existing+clerk_test@example.com"], skipPasswordRequirement: true })).id,
+    ],
+    expectChecks: (checks) => {
+      const limit = checks.rejects.filter((r) => /100-user limit/.test(r.reason)).length;
+      return limit === 1 && checks.rejects.length === 1 ? [] : [`expected exactly 1 reject for the 100-user limit, got ${limit} of ${checks.rejects.length}`];
+    },
+    expect: (clerk, seeded) => counts(clerk, { total: seeded.length - 1 }),
+  },
+  {
+    id: "X5",
+    describe: "re-run a completed import: \"already imported\", nothing added",
+    sourceConfig: APP_SCHEMA,
+    users: (all) => plain(all).slice(0, 10),
+    reimport: true,
+    expect: (clerk, seeded) => counts(clerk, { total: seeded.length }),
   },
   {
     id: "BK1K",
@@ -190,3 +278,39 @@ export const variations: Variation[] = [
     expect: expectAllLanded,
   },
 ];
+
+/** Verified email, no username: users nothing else would reject. */
+const plain = (all: SeedUser[]) => all.filter((u) => u.email && u.emailVerified && !u.username);
+/** Email + phone + a username Clerk's default rules accept: one collision of each kind. */
+const collidable = (all: SeedUser[]) =>
+  all.filter((u) => u.group === "both" && u.username && /^[a-z0-9_-]{4,}$/i.test(u.username));
+
+const counts = (clerk: { total: number; withPassword: number }, want: Partial<{ total: number; withPassword: number }>) =>
+  Object.entries(want)
+    .filter(([k, v]) => clerk[k as keyof typeof want] !== v)
+    .map(([k, v]) => `${k}: expected ${v}, got ${clerk[k as keyof typeof want]}`);
+
+type Row = Record<string, unknown>;
+const REFUSED_TLD = /\.(local|invalid|test|example|arpa)$/i;
+const verifiedEmail = (r: Row) => !!r.email && Number(r.email_verified) === 1 && !REFUSED_TLD.test(String(r.email));
+const verifiedPhone = (r: Row) => !!r.phone_number && Number(r.phone_number_verified) === 1;
+/** Clerk's default username rules: letters, digits, - and _, at least 4. */
+const badUsername = (r: Row) => typeof r.username === "string" && !/^[a-z0-9_-]{4,}$/i.test(r.username);
+const anyOf = (...why: (string | false)[]) => {
+  const words = why.filter(Boolean) as string[];
+  return words.length ? new RegExp(words.join("|")) : null;
+};
+
+/**
+ * Who each dest must reject in B9, and the word its reason must contain. D1
+ * allows everything (extended username characters on); D2–D4 keep Clerk's
+ * default username rules; D5 turns phone and username off (dropped, not
+ * rejected).
+ */
+const B9_REJECTS: Record<DestId, (r: Row) => RegExp | null> = {
+  D1: () => null,
+  D2: (r) => anyOf(!verifiedEmail(r) && "email", badUsername(r) && "username"),
+  D3: (r) => anyOf(!verifiedPhone(r) && "phone", badUsername(r) && "username"),
+  D4: (r) => anyOf((!r.username || badUsername(r)) && "username"),
+  D5: (r) => anyOf(!verifiedEmail(r) && "email"),
+};

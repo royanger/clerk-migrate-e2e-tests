@@ -135,7 +135,10 @@ export const variations: Variation[] = [
     sourceConfig: useConnection("A1", {}),
     // 12 users: every group, with a username, a full name and a European phone.
     users: mix({ "email-only": 4, "phone-only": 3, both: 5 }),
-    expect: expectLanded({ ...noPasswords, withUsername: 0, withPhone: 0 }),
+    // Phone-only users keep their phone in metadata here, so their only
+    // identifier is the <digits>@phone.local placeholder Clerk refuses: the CLI
+    // drops it and rejects them in the dry run (cli-bugs #10, a33767f6).
+    expect: expectLanded({ ...noPasswords, withUsername: 0, withPhone: 0, total: (seeded) => seeded.filter((u) => u.email).length }),
   },
   {
     id: "A2",

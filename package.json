@@ -13,7 +13,8 @@
     "supabase:sql": "op run --env-file=op.env -- tsx scripts/supabase-sql.ts",
     "db:tables": "op run --env-file=op.env -- tsx scripts/db-tables.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:migrate": "op run --env-file=op.env -- tsx scripts/test-migrate.ts"
+    "test:migrate": "op run --env-file=op.env -- tsx scripts/test-migrate.ts",
+    "test:migrate:all": "op run --env-file=op.env -- bash scripts/test-all.sh"
   },
   "devDependencies": {
     "@clerk/backend": "^3.17.0",

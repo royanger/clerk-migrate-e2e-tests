@@ -1,4 +1,4 @@
-import type { User } from "@clerk/backend";
+import type { ClerkClient, User } from "@clerk/backend";
 import type { DestId } from "./clerk-dest";
 import type { SeedUser } from "./users";
 
@@ -39,7 +39,63 @@ export type Variation = {
    * mismatches; an empty list passes.
    */
   expect?: (clerk: ClerkSummary, seeded: SeedUser[], dest: DestId, users: User[]) => string[];
+  /**
+   * Checks the dry run itself: which users it rejected and why. Each reject
+   * comes with its row from the export file, so a variation can say which
+   * users *should* be rejected under this dest and compare the sets.
+   */
+  expectChecks?: (
+    checks: DryRunChecks,
+    rejected: Rejected[],
+    seeded: SeedUser[],
+    dest: DestId,
+    exported: Record<string, unknown>[],
+  ) => string[];
+  /** Extra flags for both the dry run and the import (e.g. --require-password). */
+  importArgs?: string[];
+  /**
+   * Runs after the dest config is applied, before the dry run: put users in
+   * Clerk that the import must collide with. Returns their IDs; the runner
+   * leaves them out of the summary and deletes them afterwards.
+   */
+  beforeImport?: (clerk: ClerkClient, seeded: SeedUser[]) => Promise<string[]>;
+  /** Import the same export a second time: it must report "already imported" and add nothing. */
+  reimport?: boolean;
 };
+
+export type DryRunChecks = {
+  total: number;
+  importable: number;
+  rejects: { sourceId: string; reason: string }[];
+  rejectReasons: { reason: string; count: number }[];
+  warnings: string[];
+};
+export type Rejected = { sourceId: string; reason: string; row?: Record<string, unknown> };
+
+/**
+ * Compares the users a dry run rejected with the users that should have been,
+ * and checks each reason mentions what it was rejected for.
+ * `want` returns, per export row, the keyword its reason must contain (or null:
+ * not rejected).
+ */
+export function expectRejected(
+  rejected: Rejected[],
+  rows: Record<string, unknown>[],
+  idOf: (row: Record<string, unknown>) => string,
+  want: (row: Record<string, unknown>) => RegExp | null,
+): string[] {
+  const issues: string[] = [];
+  const got = new Map(rejected.map((r) => [r.sourceId, r.reason]));
+  for (const row of rows) {
+    const id = idOf(row);
+    const rule = want(row);
+    const reason = got.get(id);
+    if (rule && !reason) issues.push(`${id} should be rejected (${rule.source})`);
+    else if (!rule && reason) issues.push(`${id} rejected unexpectedly: ${reason}`);
+    else if (rule && reason && !rule.test(reason)) issues.push(`${id} rejected for "${reason}", expected /${rule.source}/`);
+  }
+  return issues.length > 6 ? [...issues.slice(0, 6), `…and ${issues.length - 6} more`] : issues;
+}
 
 /** A provider's variations file: the list, plus optional source lifecycle hooks. */
 export type VariationModule = {

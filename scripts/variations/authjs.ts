@@ -107,7 +107,9 @@ export const variations: Variation[] = [
     describe: "user table renamed to `users`: the exporter's fallback table name",
     sourceConfig: schema((sql) => sql.replaceAll("`user`", "`users`")),
     users: everyNth(10),
-    expect: expectLanded(authjs),
+    // Phone-only users have only the @phone.local placeholder (their phone is in
+    // this app's own column, which Auth.js doesn't define): rejected, see J4.
+    expect: expectLanded({ ...authjs, total: (seeded) => seeded.filter((u) => u.email).length }),
   },
   {
     id: "J6",
