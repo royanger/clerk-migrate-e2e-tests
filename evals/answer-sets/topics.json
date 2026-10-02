@@ -1,0 +1,11 @@
+{
+  "email-verification": "Which field records whether an email address is verified, and what counts as verified.",
+  "phone-verification": "Which field records whether a phone number is verified, and the phone number format.",
+  "hasher": "What algorithm produced the password hashes, and how the stored value is laid out.",
+  "shape": "The file's structure: whether the JSON is wrapped, CSV header rows, how nested or multi-value fields are flattened.",
+  "metadata": "Which fields are metadata, and whether each belongs in Clerk's public, private or unsafe metadata.",
+  "identifiers": "Which field is the user's stable ID, and which fields hold usernames, logins or alternate contacts.",
+  "names": "How first and last names are stored.",
+  "status": "Banned, locked, disabled, suspended or deleted users, and which users should not be imported.",
+  "dates": "How creation timestamps are stored: format, unit and timezone."
+}

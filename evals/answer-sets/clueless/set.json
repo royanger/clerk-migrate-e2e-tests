@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "The customer knows nothing about the export: every question gets the same shrug.",
+  "fallback": "I don't know, sorry. I just have this export file. Use your best judgement from the data."
+}

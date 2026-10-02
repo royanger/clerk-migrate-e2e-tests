@@ -38,6 +38,12 @@ failing on it.
 | `pnpm supabase:sql <file>` | run a `.sql` file on the Supabase project |
 | `pnpm test:migrate -p <name>` | run one provider's migration tests |
 | `pnpm test:migrate:all` | run every migration test with one 1Password approval |
+| `pnpm generate:custom` | write the made-up provider exports ([Custom sources](#custom-sources)) |
+| `pnpm test:custom -e <export> -s <source.ts>` | import one export through a custom source and grade it |
+| `pnpm test:custom --all --sources-dir <dir>` | the same for all 8 exports |
+| `pnpm eval:ready` | check both agents are signed in (and as whom), their flags work, and they are isolated |
+| `pnpm eval:sources --set <name>` | have Claude and Codex each write a source for all 8 exports, then grade them ([Source evals](#source-evals)) |
+| `pnpm eval:sync-skill` | copy the clerk-migrate skill from `skillSource` into `evals/skill/` (`-n` to preview) |
 | `pnpm typecheck` | typecheck `scripts/` |
 
 These flags apply to the commands listed. `pnpm seed -h` and `pnpm reset -h`
@@ -54,9 +60,14 @@ print their own usage.
 | `--variation <id>` | `-v` | test:migrate | run one test by its ID ([Test IDs](#test-ids)) |
 | `--dest <D1…D5\|all>` | `-d` | test:migrate | the Clerk config to import into ([Dests](#dests)) |
 | `--target <name>` | `-t` | test:migrate | the Clerk instance to import into ([Targets](#targets)) |
-| `--cli <path>` | | test:migrate, teardown | run a local Clerk CLI checkout |
+| `--export <name.fmt>` | `-e` | test:custom | the export to import, e.g. `keyhole.csv` |
+| `--source <path>` | `-s` | test:custom | the custom source to import it with |
+| `--all` | | test:custom | every export; needs `--sources-dir` |
+| `--sources-dir <dir>` | | test:custom | where `--all` finds `<name>-<fmt>.ts`, else `<name>.ts` |
+| `--cli <path>` | | test:migrate, test:custom, teardown | run a local Clerk CLI checkout |
 | `--dry-run` | `-n` | teardown | report without changing anything |
 | `--app <id>` | `-a` | teardown | skip the picker and use that app's development instance |
+| `--agent <name>` | `-a` | eval:sources | run one agent (`claude` or `codex`) instead of both |
 | `--production` | `-p` | teardown | use production: with `-a`, that app's; alone, a picker of production instances |
 | `--help` | `-h` | seed, reset | print usage |
 
@@ -305,6 +316,90 @@ The Clerk instance configs the tests import into. D1 is the default.
 | W5 | `external_id` at the 64-char limit, and name edge cases (unicode, first-only, last-only) | D1 | dev |
 | W6 | orgs, memberships, roles and TOTP factors: the export carries none, and the import must drop them without errors | D1 | dev |
 | W7 | combined: passwords, no password, unverified, metadata, `external_id`, orgs and TOTP | D1–D5 | dev |
+
+---
+
+## Custom sources
+
+Exports from four made-up auth providers, for testing a skill that writes
+`clerk migrate` custom sources. Each is further from Clerk's shape than the last:
+
+| Provider | Distance from Clerk | What makes it hard |
+|---|---|---|
+| Keyhole | ~10–15% | near-Clerk names (`phone_number`, `password_hash`), verified flags |
+| Passly | ~30% | `{ users: [...] }` wrapper, display name only, nested credentials, `status`, Unix-second dates |
+| Gatekeep | ~50–60% | `{ data: { accounts } }`, an `identities[]` array with the primary not first, pbkdf2 split into parts, one mixed `attrs` blob, `flags[]`, ms dates |
+| Vaultrun | ~70% | one `login` column holding an email, phone or username; a `vf` bitmask; `"Last, First"`; prefixed hash strings; metadata as a JSON string and `k=v;k=v`; soft-deleted rows |
+
+Each has a JSON and a CSV export of the same 50 users, and every password is
+a real hash of the seed password.
+
+```
+data/custom-sources/            the 8 exports: the only folder the skill should see
+data/custom-sources-answers/    answer keys and reference sources: keep away from the skill
+  <name>.expected.json          what each user should become in Clerk
+  <name>.ts                     a hand-written source that grades A+ on both formats
+```
+
+`pnpm test:custom` configures the dev instance for what the users hold (phone,
+username, password; nothing required), runs a dry run, imports, grades every user
+against the answer key, then undoes the import and restores the config.
+
+**The grade.** Every expected fact is one check: the user exists, each email and
+phone and its verification, primaries, username, names, banned, password (it
+must sign in), and each metadata key. Accuracy is checks passed / checks made.
+A user that never landed fails all its checks. A+ is 100%, then A ≥ 95%, B ≥ 85%,
+C ≥ 70%, D ≥ 50%, F below that or when the run fails.
+
+**The report** (`test-results/<stamp>-custom*/report.md`) groups failures by field
+and reason: five users with a broken phone are one problem listing five IDs.
+For Gatekeep and Vaultrun the export does not say which metadata is public, so
+any metadata field passes and a placement different from the reference source's
+is a note, not a failure.
+
+---
+
+## Source evals
+
+Can an agent, given only the clerk-migrate skill and one export, write a source
+that imports the users correctly? `pnpm eval:sources` runs Claude Code and Codex
+over all 8 exports (16 runs) and grades each source with `test:custom`.
+
+```
+pnpm eval:ready                                   run first: accounts, flags, isolation
+pnpm eval:sources --set clear-correct             all 16 runs
+pnpm eval:sources --set clueless -a claude          one agent
+pnpm eval:sources --set mixed --agent-cli dry-run -a codex --exports gatekeep.csv
+```
+
+| Flag | Means |
+|---|---|
+| `--set <name>` | the answer set in `evals/answer-sets/` (required) |
+| `--agent-cli none\|sources\|dry-run` | what the agent's `clerk` may run: nothing (default), `migrate sources`, or that plus `import --dry-run`. `--yes`, `undo` and `config` are always refused. |
+| `-a`, `--agent claude\|codex` | one agent, or both comma-separated (default both, Claude first) |
+| `--exports a.json,b.csv` | which exports (default all 8) |
+
+**Each run** gets a temp workspace holding only the export and the skill. Claude
+runs with project-only settings and no MCP servers; Codex with a temp HOME
+holding only its login. Neither sees your global skills, plugins, hooks or
+`CLAUDE.md`/`AGENTS.md` (`eval:ready` proves it). The agent's `clerk` is a shim
+that runs `cli` from `evals/config.json` and enforces `--agent-cli`.
+
+**Questions.** The agent ends each turn with a question, a finished source, or a
+blocker. Questions are matched to topics by a small model and answered from the
+set; one the set does not cover goes to the set's `fallback`, which is either a
+fixed reply or you, in the terminal. An answer you type can be saved into the
+set, which bumps its version. Format: `evals/answer-sets/README.md`.
+
+**Settings** (`evals/config.json`): `cli` (a `cli.ts` path, or `clerk`),
+`skillSource`, and each agent's `model` and `effort`.
+
+**Results** (`evals/runs/<stamp>-<set>/`, gitignored): `summary.md` with one row
+per run, and per run `source.ts`, `result.md` (grade, the agent's issues and
+blockers, every question and who answered it, the full `test:custom` report)
+and `transcript.jsonl`. A run whose transcript mentions this repo or the
+answer folders is flagged **contaminated**: Codex can read outside its
+workspace, and this is how that would show.
 
 ---
 
@@ -567,6 +662,15 @@ no password. Providers that demand an email give them `<digits>@phone.local`.
 scripts/                  user generator, seed/reset dispatchers, one seeder per provider
 scripts/test-migrate.ts   the migration test runner
 scripts/test-all.sh       pnpm test:migrate:all: every suite in one 1Password session
+scripts/test-custom-source.ts  pnpm test:custom: grade a custom source against an answer key
+scripts/generate-custom-exports.ts  the made-up provider exports and their answer keys
+scripts/lib/clerk-run.ts  CLI runner and Clerk waits shared by both test runners
+scripts/lib/grade.ts      the custom-source grader and report
+scripts/eval/             eval:sources runner, agent drivers, answer sets, readiness check
+evals/config.json         eval settings: CLI, skill source, models and effort
+evals/skill/              the saved copy of the clerk-migrate skill
+evals/answer-sets/        pre-written answers to the agent's questions
+evals/runs/               eval results (gitignored)
 scripts/variations/       one file of test variations per provider
 scripts/lib/clerk-dest.ts the Clerk destination configs D1–D5
 scripts/schema/           the Auth.js table schema (drizzle-kit output)

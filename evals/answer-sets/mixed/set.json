@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Some answers correct, some wrong, some unknown: what a busy customer gives.",
+  "fallback": "ask-human"
+}
