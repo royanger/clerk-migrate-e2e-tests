@@ -1,14 +1,20 @@
 /**
- * Answer sets: pre-written answers to the questions an agent asks. Layout and
- * file format: evals/answer-sets/README.md.
- *
- * A set's `all.md` answers for every provider; `<provider>.md` overrides it.
+ * Answer sets: pre-written answers to the questions an agent asks. Each eval
+ * has its own folder of sets and its own topics.json, so its answers can be
+ * tuned to exactly what that eval asks:
+ *   evals/answer-sets/sources/      eval:sources (writing a source)
+ *   evals/answer-sets/imports/      eval:imports (importing an export file)
+ *   evals/answer-sets/migrations/   eval:migrations (exporting, then importing)
+ * Layout and file format: evals/answer-sets/README.md. A set's `all.md`
+ * answers for every provider; `<provider>.md` overrides it.
  */
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hashTree } from "./config";
 
-export const SETS_DIR = "evals/answer-sets";
+export type EvalKind = "sources" | "imports" | "migrations";
+/** The folder holding one eval's answer sets. */
+export const setsDir = (kind: EvalKind) => join("evals/answer-sets", kind);
 
 export type Answer = { topic: string; tag?: string; text: string };
 
@@ -29,11 +35,11 @@ export type AnswerSet = {
 };
 
 /** topic → what it covers, from topics.json. */
-export function loadTopics(dir = SETS_DIR): Record<string, string> {
+export function loadTopics(dir: string): Record<string, string> {
   return JSON.parse(readFileSync(join(dir, "topics.json"), "utf8"));
 }
 
-export function listSets(dir = SETS_DIR): string[] {
+export function listSets(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, "set.json")))
     .map((d) => d.name);
@@ -52,13 +58,13 @@ export function parseAnswers(md: string): Map<string, Answer> {
   return out;
 }
 
-export function loadSet(name: string, setsDir = SETS_DIR): AnswerSet {
-  const dir = join(setsDir, name);
+export function loadSet(name: string, folder: string): AnswerSet {
+  const dir = join(folder, name);
   if (!existsSync(join(dir, "set.json"))) {
-    throw new Error(`No answer set "${name}" in ${setsDir}. Have: ${listSets(setsDir).join(", ")}`);
+    throw new Error(`No answer set "${name}" in ${folder}. Have: ${listSets(folder).join(", ")}`);
   }
   const meta = JSON.parse(readFileSync(join(dir, "set.json"), "utf8"));
-  const topics = loadTopics(setsDir);
+  const topics = loadTopics(folder);
   const answers = new Map<string, Map<string, Answer>>();
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
     const parsed = parseAnswers(readFileSync(join(dir, file), "utf8"));
@@ -69,7 +75,7 @@ export function loadSet(name: string, setsDir = SETS_DIR): AnswerSet {
   }
   return {
     name,
-    dir: setsDir,
+    dir: folder,
     meta,
     version: Number(meta.version ?? 1),
     description: meta.description ?? "",
@@ -79,22 +85,44 @@ export function loadSet(name: string, setsDir = SETS_DIR): AnswerSet {
   };
 }
 
+const ENV_REF = /\{\{env:(\w+)\}\}/g;
+
+/**
+ * `{{env:NAME}}` → that environment variable, filled in only when an answer is
+ * sent, so set files hold no secrets (pnpm's `op run` puts them in the env).
+ */
+export function resolveEnv(text: string): string {
+  return text.replace(ENV_REF, (_, name: string) => {
+    const v = process.env[name];
+    if (v === undefined) throw new Error(`An answer uses {{env:${name}}}, which is not set: add it to op.env`);
+    return v;
+  });
+}
+
+/** Every `{{env:NAME}}` the set's answers for `providers` use (all.md included). */
+export function envRefs(set: AnswerSet, providers?: string[]): string[] {
+  const files = [...set.answers].filter(([p]) => p === "all" || !providers || providers.includes(p));
+  return [...new Set(files.flatMap(([, a]) => [...a.values()].flatMap((x) => [...x.text.matchAll(ENV_REF)].map((m) => m[1]))))];
+}
+
 /** The set's answer for `provider` on `topic`: its own file first, then all.md. */
 export function lookup(set: AnswerSet, provider: string, topic: string): Answer | undefined {
   return set.answers.get(provider)?.get(topic) ?? set.answers.get("all")?.get(topic);
 }
 
 /**
- * Adds an answer typed during an eval to the set, tagged with the date, and
- * bumps the set's version. Replaces nothing: if the topic already has an
- * answer, the new heading is added below it and the first one keeps winning,
- * so check before saving.
+ * Adds an answer typed during an eval to the set, under each of `topics`,
+ * tagged with the date, and bumps the set's version once. Replaces nothing: if
+ * a topic already has an answer, the new heading is added below it and the
+ * first one keeps winning, so check before saving.
  */
-export function saveAnswer(set: AnswerSet, provider: string, topic: string, text: string, date = new Date()) {
+export function saveAnswer(set: AnswerSet, provider: string, topics: string[], text: string, date = new Date()) {
   const dir = join(set.dir, set.name);
   const file = join(dir, `${provider}.md`);
-  const sep = existsSync(file) && readFileSync(file, "utf8").trim() ? "\n" : "";
-  appendFileSync(file, `${sep}## ${topic} (added ${date.toISOString().slice(0, 10)})\n${text.trim()}\n`);
+  for (const topic of topics) {
+    const sep = existsSync(file) && readFileSync(file, "utf8").trim() ? "\n" : "";
+    appendFileSync(file, `${sep}## ${topic} (added ${date.toISOString().slice(0, 10)})\n${text.trim()}\n`);
+  }
   const metaFile = join(dir, "set.json");
   const meta = JSON.parse(readFileSync(metaFile, "utf8"));
   meta.version = Number(meta.version ?? 1) + 1;

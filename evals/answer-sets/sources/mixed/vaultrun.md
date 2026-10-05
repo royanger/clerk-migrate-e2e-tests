@@ -15,3 +15,9 @@ Same flat fields in both files. The CSV has a header row.
 
 ## metadata (wrong)
 `xb` is shown on the user's profile, so it's public.
+
+## names (added 2026-10-05)
+yes
+
+## dates (added 2026-10-05)
+assume utc

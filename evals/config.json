@@ -1,8 +1,15 @@
 {
   "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts",
   "skillSource": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/skills/skills/core/clerk-migrate",
+  "prompts": "evals/prompts",
   "agents": {
-    "claude": { "model": "opus", "effort": "high" },
-    "codex": { "model": "gpt-5.6-sol", "effort": "high" }
+    "claude": {
+      "model": "opus",
+      "effort": "high"
+    },
+    "codex": {
+      "model": "gpt-5.6-sol",
+      "effort": "high"
+    }
   }
 }

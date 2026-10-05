@@ -15,12 +15,13 @@ import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, w
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { lockProviders } from "../lib/lock";
 import { run } from "../lib/run";
 import { cliArgv, SKILL_DIR, type AgentName, type EvalConfig } from "./config";
 
 /** What the agent's `clerk` may run. */
-export type CliAccess = "none" | "sources" | "dry-run" | "import";
-/** What eval:sources accepts. ("import" is for an agent that runs the import itself.) */
+export type CliAccess = "none" | "sources" | "dry-run" | "import" | "migrate";
+/** What eval:sources accepts; eval:imports always uses "import". */
 export const CLI_ACCESS: CliAccess[] = ["none", "sources", "dry-run"];
 
 /** Every turn ends with this, enforced by --json-schema / --output-schema. */
@@ -107,8 +108,10 @@ function writeShim(ws: Workspace, cli: string, access: CliAccess, secretKey?: st
     // Everything an import needs, including changing instance settings (which
     // the skill only allows after the user's yes); never undo or export.
     import: `${sources} || [[ "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1" == "doctor" ]]`,
+    // Everything a whole migration needs: export from the source, then import.
+    migrate: `${sources} || [[ "$1 $2" == "migrate export" || "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1" == "doctor" ]]`,
   }[access];
-  const key = (access === "dry-run" || access === "import") && secretKey ? `export CLERK_SECRET_KEY='${secretKey}'` : "";
+  const key = (access === "dry-run" || access === "import" || access === "migrate") && secretKey ? `export CLERK_SECRET_KEY='${secretKey}'` : "";
   // bash 3.2 (macOS /bin/bash): no $EPOCHREALTIME, so calls are ordered by the
   // question round the runner writes before each turn.
   const shim = `#!/bin/bash
@@ -171,7 +174,7 @@ export async function runTurn(
   cfg: EvalConfig,
   ws: Workspace,
   prompt: string,
-  opts: { resume?: string; access: CliAccess; timeoutMs?: number },
+  opts: { resume?: string; access: CliAccess; timeoutMs?: number; system?: string },
 ): Promise<Turn> {
   const { model, effort } = cfg.agents[agent];
   // pnpm puts this repo's node_modules/.bin on PATH; that would hand the agent
@@ -198,6 +201,8 @@ export async function runTurn(
       ].join(","),
       // Questions go through the turn output, so the runner can answer them.
       "--disallowedTools", "AskUserQuestion,WebFetch,WebSearch",
+      // Sent on every turn: a resumed print-mode session takes its system prompt from the flags.
+      ...(opts.system ? ["--append-system-prompt", opts.system] : []),
       ...(opts.resume ? ["--resume", opts.resume] : []),
     ];
     const r = await run("claude", args, env, { cwd: ws.dir, timeoutMs });
@@ -236,13 +241,15 @@ export async function runTurn(
     // any real `clerk` there) ahead of the shim.
     "-c", "allow_login_shell=false",
     // The dry run and import call Clerk; the workspace-write sandbox blocks the network otherwise.
-    "-c", `sandbox_workspace_write.network_access=${opts.access === "dry-run" || opts.access === "import"}`,
+    "-c", `sandbox_workspace_write.network_access=${opts.access !== "none" && opts.access !== "sources"}`,
+    ...(opts.system ? ["-c", `developer_instructions=${JSON.stringify(opts.system)}`] : []),
     "--output-schema", schemaFile,
     "-o", lastFile,
   ];
   const args = opts.resume ? ["exec", "resume", ...flags, opts.resume, prompt] : ["exec", ...flags, prompt];
+  await syncCodexLogin(ws, "in");
   const r = await run("codex", args, { ...env, HOME: ws.home, CODEX_HOME: join(ws.home, ".codex") }, { cwd: ws.dir, timeoutMs });
-  keepCodexLogin(ws);
+  await syncCodexLogin(ws, "out");
   const thread = r.stdout.split("\n").map((l) => parseJson<{ type?: string; thread_id?: string }>(l)).find((e) => e?.type === "thread.started");
   return {
     code: r.code,
@@ -263,18 +270,27 @@ function parseJson<T>(s: string): T | undefined {
 }
 
 /**
- * A token refresh inside the temp home rotates the refresh token, which would
- * leave ~/.codex/auth.json holding a dead one. Copy a newer login back.
+ * Codex refresh tokens rotate: a refresh in one temp home kills the token every
+ * other copy holds. So whichever copy is newer wins, both ways: before a turn
+ * the workspace takes a newer login (another run refreshed it), after a turn
+ * the real ~/.codex/auth.json takes a newer one. Under a lock, since parallel
+ * batches each have their own temp homes.
  */
-function keepCodexLogin(ws: Workspace) {
+async function syncCodexLogin(ws: Workspace, direction: "in" | "out") {
   const real = join(homedir(), ".codex/auth.json");
   const temp = join(ws.home, ".codex/auth.json");
   if (!existsSync(temp)) return;
-  const a = readFileSync(real, "utf8");
-  const b = readFileSync(temp, "utf8");
-  if (a === b) return;
-  const refreshed = (s: string) => Date.parse(parseJson<{ last_refresh?: string }>(s)?.last_refresh ?? "") || 0;
-  if (refreshed(b) > refreshed(a)) writeFileSync(real, b, { mode: 0o600 });
+  const release = await lockProviders(["codex-auth"], "codex login sync", 200);
+  try {
+    const a = readFileSync(real, "utf8");
+    const b = readFileSync(temp, "utf8");
+    if (a === b) return;
+    const refreshed = (s: string) => Date.parse(parseJson<{ last_refresh?: string }>(s)?.last_refresh ?? "") || 0;
+    if (direction === "out" && refreshed(b) > refreshed(a)) writeFileSync(real, b, { mode: 0o600 });
+    if (direction === "in" && refreshed(a) > refreshed(b)) writeFileSync(temp, a, { mode: 0o600 });
+  } finally {
+    release();
+  }
 }
 
 // ── accounts ──

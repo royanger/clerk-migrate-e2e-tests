@@ -24,14 +24,16 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "../lib/run";
-import { clerkRun, cliVersion, TARGETS } from "../lib/clerk-run";
-import { configForUsers, DEST_KEYS } from "../lib/clerk-dest";
+import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
+import { claimTarget, targetArgs, targetEnv } from "../lib/targets";
+import { configForUsers } from "../lib/clerk-dest";
 import { value } from "../lib/args";
 import type { Grade } from "../lib/grade";
 import type { AnswerKey } from "../generate-custom-exports";
 import { claudeAccount, codexAccount, CLI_ACCESS, createWorkspace, type CliAccess, type TurnOutput } from "./agents";
-import { loadSet, loadTopics } from "./answers";
-import { answerer, contamination, counts, minutes, qaMarkdown, runSession, SESSION_RULES, type QA } from "./session";
+import { loadSet, loadTopics, setsDir } from "./answers";
+import { loadPrompts } from "./prompts";
+import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type QA } from "./session";
 import { AGENTS, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 
 const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
@@ -56,13 +58,9 @@ if (bad.length) {
 }
 
 const cfg = loadConfig();
-const answers = answerer(loadSet(setName!), loadTopics());
+const SETS = setsDir("sources");
+const answers = answerer(loadSet(setName!, SETS), loadTopics(SETS));
 const set = answers.set;
-const secretKey = process.env[TARGETS.dev.key];
-if (!secretKey) {
-  console.error(`${TARGETS.dev.key} is not set: run through op (pnpm eval:sources does)`);
-  process.exit(2);
-}
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
 const batchDir = resolve("evals/runs", `${stamp}-${set.name}`);
@@ -71,12 +69,6 @@ const repoRoot = process.cwd();
 
 // Only `dry-run` lets the agent touch Clerk, and its dry run should see an
 // instance set up for these users, as a real customer's would be.
-const target = ["--app", TARGETS.dev.app, "--instance", TARGETS.dev.instance];
-const clerk = clerkRun({ cli: cfg.cli, secretKey, log: join(batchDir, "clerk.log") });
-async function patchConfig(body: object) {
-  const r = await clerk.cli(["config", "patch", ...target, "--json", JSON.stringify(body), "--yes"]);
-  if (r.code !== 0) throw new Error(`config patch failed (exit ${r.code}); see clerk.log`);
-}
 
 // ── one run ──
 
@@ -87,21 +79,10 @@ const ACCESS_LINE: Record<CliAccess, string> = {
     "In this session `clerk migrate sources <file>` and `clerk migrate import <file> --source <source> --dry-run` " +
     "are available, against a test instance already configured for these users. Importing is not.",
   import: "The `clerk` CLI is available and points at the customer's Clerk instance.",
+  migrate: "The `clerk` CLI is available and points at the customer's Clerk instance.",
 };
 
-function firstPrompt(file: string) {
-  return [
-    `A customer is migrating their users into Clerk. Their user export is \`${file}\` in your working directory. ` +
-      "It comes from an auth platform that has no built-in Clerk source.",
-    "",
-    "Use the clerk-migrate skill to write a custom source for this export, saved as a .ts file in your working directory.",
-    "",
-    ...SESSION_RULES,
-    '- When the source file is written, end with status "done" and `sourceFile` set to its file name.',
-    `- ${ACCESS_LINE[access]}`,
-    "- Do not import users.",
-  ].join("\n");
-}
+const prompts = loadPrompts("sources", cfg);
 
 type Result = {
   agent: AgentName;
@@ -121,6 +102,10 @@ type Result = {
   setVersion: number;
   /** The CLI build test:custom graded with. */
   cliVersion?: string;
+  /** Set when setup failed: nothing was graded, so it is not an F. */
+  notRun?: string;
+  /** The Clerk target (evals/targets.json) the run claimed. */
+  target?: string;
 };
 
 /** The source the agent wrote: the file it named, else the newest .ts/.js it created. */
@@ -149,14 +134,22 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
   const root = mkdtempSync(join(tmpdir(), `eval-${agent}-${provider}-`));
   const transcript = join(dir, "transcript.jsonl");
   const started = Date.now();
+  // One pool target for the agent's dry runs and test:custom's grading.
+  let claim: Awaited<ReturnType<typeof claimTarget>> | undefined;
 
   try {
+    claim = await claimTarget(`eval:sources ${stamp} ${agent}/${exportName}`);
+    result.target = claim.target.name;
     const key = JSON.parse(readFileSync(`data/custom-sources-answers/${provider}.expected.json`, "utf8")) as AnswerKey;
-    if (access === "dry-run") await patchConfig(configForUsers(key.users));
-    const ws = createWorkspace(root, agent, cfg, [resolve("data/custom-sources", exportName)], access, secretKey);
+    if (access === "dry-run") {
+      const clerk = clerkRun({ cli: cfg.cli, secretKey: claim.target.secretKey, log: join(batchDir, "clerk.log") });
+      await clerk.patchConfig(targetArgs(claim.target), configForUsers(key.users));
+    }
+    const ws = createWorkspace(root, agent, cfg, [resolve("data/custom-sources", exportName)], access, claim.target.secretKey);
 
+    const vars = { file: exportName, provider, cliAccess: ACCESS_LINE[access] };
     const s = await runSession({
-      agent, cfg, ws, access, prompt: firstPrompt(exportName), provider,
+      agent, cfg, ws, access, prompt: prompts.user(vars), system: prompts.system(vars), provider,
       label: `${agent} · ${exportName}`, answers, transcript,
     });
     Object.assign(result, { status: s.status, rounds: s.rounds, qa: s.qa, issues: s.issues });
@@ -168,6 +161,7 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
     }
   } catch (error) {
     result.issues.push(`runner: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof SetupError) result.notRun = String(error.message);
   } finally {
     result.seconds = Math.round((Date.now() - started) / 1000);
     rmSync(root, { recursive: true, force: true });
@@ -176,8 +170,11 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
   result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS) : [];
 
   // ── grade with test:custom ──
-  if (result.sourceFile) {
-    const t = await run("tsx", ["scripts/test-custom-source.ts", "-e", exportName, "-s", join(dir, result.sourceFile), "--cli", cfg.cli, "--out", dir], process.env);
+  if (result.sourceFile && claim) {
+    // The child grades on this run's target: it inherits the lock (PROVIDER_LOCKS) and is told which one.
+    const t = await run("tsx", ["scripts/test-custom-source.ts", "-e", exportName, "-s", join(dir, result.sourceFile), "--cli", cfg.cli, "--out", dir], {
+      ...process.env, ...targetEnv(claim.target),
+    }).finally(() => claim?.release());
     writeFileSync(join(dir, "test-custom.log"), t.stdout + t.stderr);
     const report = join(dir, "test-custom", "report.md");
     if (existsSync(report)) {
@@ -186,11 +183,13 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
       result.grade = json.results[0]?.grade;
       result.gradeError = json.results[0]?.error;
       result.cliVersion = json.cliVersion;
+      if (!result.grade && String(result.gradeError ?? "").startsWith("not run")) result.notRun = result.gradeError;
     } else {
       result.gradeError = `test:custom exited ${t.code} without a report: ${(t.stderr || t.stdout).trim().split("\n").slice(-3).join(" ")}`;
     }
   } else {
-    result.gradeError = "the agent wrote no source file";
+    claim?.release();
+    result.gradeError = result.notRun ?? "the agent wrote no source file";
   }
 
   writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2));
@@ -205,13 +204,15 @@ const pct = (g?: Grade) => (g ? `${(Math.floor(g.accuracy * 1000) / 10).toFixed(
 function resultMarkdown(r: Result): string {
   const c = counts(r.qa);
   const lines = [
-    `# ${r.agent} · ${r.export}: ${r.grade?.grade ?? "F"} (${pct(r.grade)})`,
+    `# ${r.agent} · ${r.export}: ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} (${pct(r.grade)})`,
     "",
     `| | |`,
     `|---|---|`,
     `| Agent | ${r.agent} (${r.model}, effort ${r.effort}) |`,
+    `| Clerk target | ${r.target ?? "none claimed"} |`,
     `| Answer set | ${set.name} v${r.setVersion} |`,
     `| Skill | ${skillHash} |`,
+    `| Prompts | ${prompts.dir} (${prompts.hash}) |`,
     `| Agent CLI access | ${access} |`,
     `| Status | ${r.status} after ${r.rounds} round(s), ${minutes(r.seconds)} min |`,
     `| Questions | ${r.qa.length}: ${c.set} from the set, ${c.fallback} fallback, ${c.you} from you |`,
@@ -244,7 +245,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
       versions.size > 1 && `set v${r.setVersion}`,
       clis.size > 1 && `CLI ${r.cliVersion ?? "?"}`,
     ].filter(Boolean).join("; ");
-    return `| ${r.agent} | ${r.export} | ${r.grade?.grade ?? "F"} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
+    return `| ${r.agent} | ${r.export} | ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
       `${c.set}/${c.fallback}/${c.you} | ${minutes(r.seconds)} | [result](${r.agent}/${r.export}/result.md) | ${notes} |`;
   });
   return [
@@ -276,6 +277,7 @@ for (const a of agents) {
 const meta: Record<string, string> = {
   set: `${set.name} v${set.version} (${set.hash})`,
   skill: `${SKILL_DIR} (${skillHash})`,
+  prompts: `${prompts.dir} (${prompts.hash})`,
   "agent CLI access": access,
   cli: `${cfg.cli} @ ${cliVersion(cfg.cli)}`,
   ...Object.fromEntries(agents.map((a) => [a, `${cfg.agents[a].model}, effort ${cfg.agents[a].effort} · ${accounts[a].version} · ${accounts[a].detail}`])),
@@ -285,25 +287,20 @@ console.log(`Eval → ${relative(repoRoot, batchDir)}`);
 for (const [k, v] of Object.entries(meta)) console.log(`  ${k}: ${v}`);
 console.log(`  ${agents.length * exports.length} runs\n`);
 
-const snapshot = access === "dry-run" ? JSON.parse((await clerk.cli(["config", "pull", ...target])).stdout) : undefined;
 const results: Result[] = [];
-try {
-  for (const agent of agents) {
-    for (const exportName of exports) {
-      process.stdout.write(`${agent.padEnd(7)} ${exportName.padEnd(14)} … `);
-      const r = await runOne(agent, exportName);
-      results.push(r);
-      const c = counts(r.qa);
-      console.log(
-        `${(r.grade?.grade ?? "F").padEnd(3)} ${pct(r.grade).padStart(6)}   ${r.status}, ${r.qa.length} questions ` +
-          `(${c.set} set, ${c.fallback} fallback, ${c.you} you), ${minutes(r.seconds)} min` +
-          (r.contaminated.length ? "   CONTAMINATED" : "") + (r.gradeError && !r.grade ? `   ✗ ${r.gradeError}` : ""),
-      );
-      writeFileSync(join(batchDir, "summary.md"), summaryMarkdown(results, meta));
-      writeFileSync(join(batchDir, "summary.json"), JSON.stringify({ meta, results }, null, 2));
-    }
+for (const agent of agents) {
+  for (const exportName of exports) {
+    process.stdout.write(`${agent.padEnd(7)} ${exportName.padEnd(14)} … `);
+    const r = await runOne(agent, exportName);
+    results.push(r);
+    const c = counts(r.qa);
+    console.log(
+      `${((r.notRun ? "—" : (r.grade?.grade ?? "F"))).padEnd(3)} ${pct(r.grade).padStart(6)}   ${r.status}, ${r.qa.length} questions ` +
+        `(${c.set} set, ${c.fallback} fallback, ${c.you} you), ${minutes(r.seconds)} min` +
+        (r.contaminated.length ? "   CONTAMINATED" : "") + (r.gradeError && !r.grade ? `   ✗ ${r.gradeError}` : ""),
+    );
+    writeFileSync(join(batchDir, "summary.md"), summaryMarkdown(results, meta));
+    writeFileSync(join(batchDir, "summary.json"), JSON.stringify({ meta, results }, null, 2));
   }
-} finally {
-  if (snapshot) await patchConfig(Object.fromEntries(DEST_KEYS.map((k) => [k, snapshot[k]]))).catch((e) => console.error(`!! config restore failed: ${e.message}`));
 }
 console.log(`\nSummary: ${relative(repoRoot, join(batchDir, "summary.md"))}`);

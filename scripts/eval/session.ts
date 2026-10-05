@@ -6,7 +6,7 @@
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { runTurn, setRound, type CliAccess, type TurnOutput, type Workspace } from "./agents";
-import { loadSet, lookup, saveAnswer, type AnswerSet } from "./answers";
+import { loadSet, lookup, resolveEnv, saveAnswer, type AnswerSet } from "./answers";
 import { classify } from "./classify";
 import type { AgentName, EvalConfig } from "./config";
 
@@ -72,12 +72,23 @@ export function answerer(initial: AnswerSet, topics: Record<string, string>) {
 
         const save = (await ask(`Save to set "${set.name}" for ${provider}? [y/N] `)).trim().toLowerCase();
         if (save === "y" || save === "yes") {
-          let topic = matched[i].length === 1 ? matched[i][0] : "";
-          while (!(topic in topics)) topic = (await ask(`Topic (${Object.keys(topics).join(", ")}): `)).trim();
-          if (lookup(set, provider, topic)) console.log(`${provider} already answers ${topic}; the new answer is added below it and the first one still wins.`);
-          const version = saveAnswer(set, provider, topic, text);
+          // One answer often covers several topics ("yes to both"): Enter saves it under all of them.
+          const suggested = matched[i].join(",");
+          let chosen = matched[i].length === 1 ? matched[i] : [];
+          while (!chosen.length || chosen.some((t) => !(t in topics))) {
+            const raw = (await ask(
+              `Topic(s), comma-separated${suggested ? ` [Enter = ${suggested}]` : ""} (${Object.keys(topics).join(", ")}): `,
+            )).trim();
+            chosen = (raw || suggested).split(",").map((t) => t.trim()).filter(Boolean);
+            const unknown = chosen.filter((t) => !(t in topics));
+            if (unknown.length) console.log(`Not a topic: ${unknown.join(", ")}`);
+          }
+          for (const t of chosen.filter((t) => lookup(set, provider, t))) {
+            console.log(`${provider} already answers ${t}; the new answer is added below it and the first one still wins.`);
+          }
+          const version = saveAnswer(set, provider, chosen, text);
           set = loadSet(set.name, set.dir);
-          console.log(`Saved as ${topic}; "${set.name}" is now v${version}.`);
+          console.log(`Saved as ${chosen.join(", ")}; "${set.name}" is now v${version}.`);
         }
       }
       return out;
@@ -87,20 +98,13 @@ export function answerer(initial: AnswerSet, topics: Record<string, string>) {
 
 export type Answerer = ReturnType<typeof answerer>;
 
-/** The rules of the conversation, shared by every eval's first prompt. */
-export const SESSION_RULES = [
-  "How this session works:",
-  "- You cannot talk to the customer directly. When you need information or a decision from them, end your turn with " +
-    'status "question" and put each question in `questions`, one question per item. Their answers arrive as the next message.',
-  '- If you cannot finish, end with status "blocked" and explain in `issues`.',
-  "- Use `issues` for any problem, assumption or blocker worth a reviewer's attention.",
-];
-
+/** QA keeps `{{env:…}}` as written, so result.md shows no secrets; only the agent gets the values. */
 const answersPrompt = (qa: QA[]) =>
-  ["The customer answered:", "", ...qa.flatMap((q) => [`Q: ${q.question}`, `A: ${q.answer}`, ""])].join("\n");
+  ["The customer answered:", "", ...qa.flatMap((q) => [`Q: ${q.question}`, `A: ${resolveEnv(q.answer)}`, ""])].join("\n");
 
 export type Session = {
-  status: TurnOutput["status"] | "error" | "stuck";
+  /** "timeout": a turn stalled twice (seen when the model's stream breaks and never resumes). */
+  status: TurnOutput["status"] | "error" | "stuck" | "timeout";
   rounds: number;
   qa: QA[];
   issues: string[];
@@ -124,6 +128,8 @@ export async function runSession(opts: {
   label: string;
   answers: Answerer;
   transcript: string;
+  /** Appended to the agent's system prompt on every turn. */
+  system?: string;
 }): Promise<Session> {
   const s: Session = { status: "error", rounds: 0, qa: [], issues: [] };
   let prompt = opts.prompt;
@@ -131,10 +137,25 @@ export async function runSession(opts: {
   for (let round = 1; ; round++) {
     s.rounds = round;
     setRound(opts.ws, round);
-    appendFileSync(opts.transcript, JSON.stringify({ eval: "prompt", round, prompt }) + "\n");
-    const turn = await runTurn(opts.agent, opts.cfg, opts.ws, prompt, { access: opts.access, resume: session });
+    appendFileSync(opts.transcript, JSON.stringify({ eval: "prompt", round, prompt, ...(round === 1 && opts.system ? { system: opts.system } : {}) }) + "\n");
+    let turn = await runTurn(opts.agent, opts.cfg, opts.ws, prompt, { access: opts.access, resume: session, system: opts.system });
     appendFileSync(opts.transcript, turn.events + (turn.stderr ? JSON.stringify({ eval: "stderr", round, stderr: turn.stderr }) + "\n" : ""));
     session = turn.sessionId ?? session;
+    // A stalled turn (a broken stream that never resumed) is not the agent's
+    // answer: resume the session once before calling it.
+    if (turn.code === 124 && session) {
+      s.issues.push(`[harness] round ${round} stalled with no output for ${Math.round(turn.seconds / 60)} min; resumed once`);
+      const retry = "Your last turn was interrupted before it finished. Continue from where you were.";
+      appendFileSync(opts.transcript, JSON.stringify({ eval: "prompt", round, prompt: retry, retryOfStall: true }) + "\n");
+      turn = await runTurn(opts.agent, opts.cfg, opts.ws, retry, { access: opts.access, resume: session, system: opts.system });
+      appendFileSync(opts.transcript, turn.events + (turn.stderr ? JSON.stringify({ eval: "stderr", round, stderr: turn.stderr }) + "\n" : ""));
+      session = turn.sessionId ?? session;
+      if (turn.code === 124) {
+        s.status = "timeout";
+        s.issues.push(`[harness] round ${round} stalled again after resuming; stopped`);
+        return s;
+      }
+    }
     s.output = turn.output ?? s.output;
     if (turn.code !== 0 || !turn.output) {
       s.status = "error";

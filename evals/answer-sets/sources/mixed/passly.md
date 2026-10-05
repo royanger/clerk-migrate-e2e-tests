@@ -12,3 +12,12 @@ The JSON has the users under a `users` key. The CSV has a header row.
 
 ## status (wrong)
 Suspended users were deleted on our side. Skip them.
+
+## metadata (added 2026-10-05)
+publicMetadata
+
+## names (added 2026-10-05)
+yes
+
+## identifiers (added 2026-10-05)
+Enable usernames

@@ -15,6 +15,8 @@ export const AGENTS: AgentName[] = ["claude", "codex"];
 export type EvalConfig = {
   cli: string;
   skillSource: string;
+  /** Folder of prompt files (evals/prompts/README.md). */
+  prompts: string;
   agents: Record<AgentName, { model: string; effort: string }>;
 };
 
@@ -25,7 +27,7 @@ const expand = (p: string) => p.replace(/^~(?=\/|$)/, homedir());
 
 export function loadConfig(): EvalConfig {
   const c = JSON.parse(readFileSync("evals/config.json", "utf8")) as EvalConfig;
-  return { ...c, cli: expand(c.cli), skillSource: expand(c.skillSource) };
+  return { ...c, cli: expand(c.cli), skillSource: expand(c.skillSource), prompts: c.prompts ?? "evals/prompts" };
 }
 
 export { cliArgv } from "../lib/clerk-run";
