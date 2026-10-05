@@ -60,6 +60,8 @@ export type Expected = {
   externalId: string;
   /** Rejected by the source (soft-deleted): must not be in Clerk. */
   skip?: string;
+  /** A skipped user's emails, phones and username, for matching it by identifier. */
+  identifiers?: string[];
   primaryEmail?: string;
   emails: string[];
   unverifiedEmails: string[];

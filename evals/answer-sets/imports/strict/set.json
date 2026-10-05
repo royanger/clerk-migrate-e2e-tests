@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "description": "Importing an export file under email and password required (D2), so phone-only and passwordless users are rejected. The customer keeps the settings and skips those users.",
+  "fallback": "ask-human",
+  "dest": "D2",
+  "allowPartial": true
+}

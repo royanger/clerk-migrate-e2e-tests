@@ -5,4 +5,5 @@ node_modules
 test-results
 clerk-runs
 evals/runs
+data/provider-exports
 data/.locks

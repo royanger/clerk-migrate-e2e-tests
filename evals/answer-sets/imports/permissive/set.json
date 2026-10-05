@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "description": "Everything on, nothing required (D1). Importing an export file. A customer who wants it done: yes to importing, no to changing settings.",
+  "fallback": "ask-human",
+  "dest": "D1",
+  "allowPartial": true
+}
