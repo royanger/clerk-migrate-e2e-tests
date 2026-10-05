@@ -30,6 +30,11 @@ export const FLAGS = {
    * never run in the same script. */
   agents: ["--agents", "--agent", "-a"],
   exports: ["--exports"],
+  promptDir: ["--prompt-dir"],
+  usersFile: ["--users-file"],
+  seedOnly: ["--seed-only"],
+  restoreSource: ["--restore-source"],
+  exportTo: ["--export-to"],
 } as const;
 
 type Name = keyof typeof FLAGS;

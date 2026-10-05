@@ -28,20 +28,43 @@ export function cliVersion(cli: string): string {
   }
 }
 
+/** The environment around a run failed (not the thing under test): report it as not run, not as a fail. */
+export class SetupError extends Error {
+  override name = "SetupError";
+}
+
 export const DEFAULT_CLI = join(
   homedir(),
   "clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts",
 );
 
+type Target = { app: string; instance: string; key: string };
+
 /**
- * Clerk instances a run can import into. `dev` takes every test except the 10K
- * ones (and is the Clerk-as-source instance too); the other two are 10K only.
+ * Clerk instances test:migrate can import into. `dev` takes every test except
+ * the 10K ones (and is the Clerk-as-source instance too); the other two are
+ * 10K only. `dev` is the migrate-tests instance: its key and app ID come from
+ * the environment (op.env), and its instance ID from its key, so call
+ * `resolveTargets()` once before reading `TARGETS.dev.instance`.
  */
-export const TARGETS = {
-  dev: { app: "app_3HYFnu4WUmQ1p5DS301lefhySiO", instance: "ins_3HYFnwsybLbCpZ3iqN5yt4odmrx", key: "CLERK_SECRET_KEY" },
+export const TARGETS: Record<"dev" | "10k-dev" | "10k-prod", Target> = {
+  dev: { app: process.env.CLERK_MIGRATE_TESTS_1_APP_ID ?? "", instance: "", key: "CLERK_MIGRATE_TESTS_1_SECRET_KEY" },
   "10k-dev": { app: "app_3JVnO515SfI9c8lo2l3KskmG7MQ", instance: "ins_3JVnO75emwoOfD4sY7FeE5BDJFi", key: "CLERK_SECRET_KEY_10K_DEV" },
   "10k-prod": { app: "app_3JVnO515SfI9c8lo2l3KskmG7MQ", instance: "ins_3JVszqLLBrKGLYjh7Ag1f4kRGny", key: "CLERK_SECRET_KEY_10K_PROD" },
-} as const;
+};
+
+/** The instance a Backend API secret key belongs to (GET /v1/instance). */
+export async function instanceIdOf(secretKey: string): Promise<string> {
+  const res = await fetch("https://api.clerk.com/v1/instance", { headers: { Authorization: `Bearer ${secretKey}` } });
+  if (!res.ok) throw new Error(`Clerk answered ${res.status} for GET /v1/instance`);
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** Fills in what TARGETS takes from the environment: the dev instance's ID, from its key. */
+export async function resolveTargets() {
+  const key = process.env[TARGETS.dev.key];
+  if (!TARGETS.dev.instance && key) TARGETS.dev.instance = await instanceIdOf(key);
+}
 
 /**
  * @param opts.cli - Path to the CLI's cli.ts (run with bun), or a binary such as `clerk`.
@@ -51,13 +74,16 @@ export const TARGETS = {
 export function clerkRun(opts: { cli: string; secretKey: string; log: string; env?: Record<string, string> }) {
   const clerk = createClerkClient({ secretKey: opts.secretKey });
 
-  /** Runs the migrate CLI; stdout is JSON under --json, stderr goes to the log. */
-  async function cli(args: string[], env: Record<string, string | undefined> = {}) {
+  /**
+   * Runs the migrate CLI; stdout is JSON under --json, stderr goes to the log.
+   * @param timeoutMs - Kill it after this long (exit code 124).
+   */
+  async function cli(args: string[], env: Record<string, string | undefined> = {}, timeoutMs?: number) {
     const [bin, ...pre] = cliArgv(opts.cli);
     const result = await run(bin, [...pre, ...args], {
       // The target's key, so nothing in the CLI can fall back to another instance.
       ...process.env, CLERK_TELEMETRY_DISABLED: "1", CLERK_SECRET_KEY: opts.secretKey, ...opts.env, ...env,
-    });
+    }, { timeoutMs });
     appendFileSync(opts.log, `$ clerk ${args.join(" ")}\n${result.stderr}\n`);
     let json: any = null;
     try {
@@ -115,5 +141,24 @@ export function clerkRun(opts: { cli: string; secretKey: string; log: string; en
     return { checked: withPassword.length, failed: bad };
   }
 
-  return { clerk, cli, settledCount, clerkUsers, verifyPasswords };
+  /**
+   * `clerk config patch`, with a timeout and retries: the Platform API has been
+   * seen to hang for over an hour before answering "The operation timed out."
+   *
+   * @throws SetupError after the last attempt, so callers can tell a broken
+   *   setup from a result.
+   */
+  async function patchConfig(target: string[], body: object, attempts = 3, timeoutMs = 120_000) {
+    let last = "";
+    for (let i = 1; i <= attempts; i++) {
+      const r = await cli(["config", "patch", ...target, "--json", JSON.stringify(body), "--yes"], {}, timeoutMs);
+      if (r.code === 0) return;
+      last = r.code === 124 ? `timed out after ${timeoutMs / 1000}s` : `exit ${r.code}: ${(r.json?.error?.message ?? r.stderr.trim().split("\n").pop() ?? "").slice(0, 200)}`;
+      appendFileSync(opts.log, `!! config patch attempt ${i}/${attempts} failed: ${last}\n`);
+      if (i < attempts) await new Promise((res) => setTimeout(res, 10_000 * i));
+    }
+    throw new SetupError(`clerk config patch failed ${attempts} times; last: ${last}`);
+  }
+
+  return { clerk, cli, settledCount, clerkUsers, verifyPasswords, patchConfig };
 }

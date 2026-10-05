@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 /**
  * Runs a child process without blocking the event loop.
@@ -12,6 +12,9 @@ import { spawn } from "node:child_process";
  * stdin to end before it starts.
  *
  * @param opts.timeoutMs - Kill the child (SIGTERM) after this long; `code` is then 124.
+ *   Its own children go too, and the result comes back once it exits rather
+ *   than when its pipes close: a grandchild still holding stdout would
+ *   otherwise keep the call waiting.
  */
 export function run(
   command: string,
@@ -24,18 +27,23 @@ export function run(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    const finish = (code: number | null) => {
+      clearTimeout(timer);
+      resolve({ code: timedOut ? 124 : (code ?? 1), stdout, stderr });
+    };
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
+          if (child.pid) spawnSync("pkill", ["-TERM", "-P", String(child.pid)]);
           child.kill("SIGTERM");
         }, opts.timeoutMs)
       : undefined;
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", reject);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: timedOut ? 124 : (code ?? 1), stdout, stderr });
+    child.on("close", finish);
+    child.on("exit", (code) => {
+      if (timedOut) finish(code);
     });
   });
 }

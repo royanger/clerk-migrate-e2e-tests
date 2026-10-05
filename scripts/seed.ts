@@ -15,6 +15,7 @@
  * the end.
  */
 import { PROVIDERS, selectProviders, type Provider } from "./lib/providers";
+import { lockProviders } from "./lib/lock";
 import { usersFile } from "./lib/users";
 import { flag, spell } from "./lib/args";
 
@@ -42,6 +43,8 @@ const MODULES: Record<Provider, string> = {
 };
 
 const selected = selectProviders("seed");
+// Waits if another run is seeding, exporting or resetting one of these.
+await lockProviders(selected, `pnpm seed -p ${selected.join(",")}`);
 // Dedupe: a default run picks both Turso apps, but that is a single seeder.
 // Group the provider names back onto their module so the log says "authjs,
 // better-auth" rather than the file it happens to live in.

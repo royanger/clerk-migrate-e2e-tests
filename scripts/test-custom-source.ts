@@ -11,7 +11,7 @@
  * export (`keyhole-csv.ts`, else `keyhole.ts`). An export with neither is
  * reported as not run.
  *
- * Per export: check the dev instance is empty → configure Clerk for what the
+ * Per export, on a Clerk target from the pool (evals/targets.json): check it is empty → configure Clerk for what the
  * users hold (phone, username, password; nothing required) → dry run → import
  * → grade every user → undo. The Clerk config is snapshotted first and
  * restored in a finally block.
@@ -22,22 +22,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { clerkRun, cliVersion, DEFAULT_CLI, TARGETS } from "./lib/clerk-run";
+import { clerkRun, cliVersion, DEFAULT_CLI, SetupError } from "./lib/clerk-run";
 import { configForUsers, DEST_KEYS } from "./lib/clerk-dest";
 import { grade, section, summaryLine, type Grade } from "./lib/grade";
 import { flag, value } from "./lib/args";
+import { claimTarget, targetArgs } from "./lib/targets";
 import type { AnswerKey } from "./generate-custom-exports";
 
 const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
 /** A cli.ts path, or a binary on PATH such as `clerk`. */
 const cliFlag = value("cli")?.replace(/^~(?=\/|$)/, homedir());
 const CLI = cliFlag ? (cliFlag.includes("/") ? resolve(cliFlag) : cliFlag) : DEFAULT_CLI;
-const TARGET = TARGETS.dev;
-const SECRET_KEY = process.env[TARGET.key];
-if (!SECRET_KEY) {
-  console.error(`${TARGET.key} is not set — is it in op.env?`);
-  process.exit(2);
-}
 
 // ── which exports, with which source ──
 
@@ -76,14 +71,16 @@ const clerkRunsDir = out ? resolve(out, "clerk-runs") : resolve("clerk-runs", ru
 const CLI_VERSION = cliVersion(CLI);
 mkdirSync(runDir, { recursive: true });
 mkdirSync(clerkRunsDir, { recursive: true });
-const { cli, settledCount, clerkUsers, verifyPasswords } = clerkRun({ cli: CLI, secretKey: SECRET_KEY, log: join(runDir, "log.txt") });
-const target = ["--app", TARGET.app, "--instance", TARGET.instance];
+// The pool target the parent eval claimed for this run (CLERK_TARGET_NAME), else a free one.
+const claim = await claimTarget(`test:custom ${jobs.map((j) => j.name).join(",")}`).catch((e: Error) => {
+  console.error(e.message);
+  process.exit(2);
+});
+const { cli, settledCount, clerkUsers, verifyPasswords, patchConfig: clerkPatch } = clerkRun({ cli: CLI, secretKey: claim.target.secretKey, log: join(runDir, "log.txt") });
+const target = targetArgs(claim.target);
 const runsDir = ["--runs-dir", clerkRunsDir];
 
-async function patchConfig(body: object) {
-  const r = await cli(["config", "patch", ...target, "--json", JSON.stringify(body), "--yes"]);
-  if (r.code !== 0) throw new Error(`config patch failed (exit ${r.code}); see log.txt`);
-}
+const patchConfig = (body: object) => clerkPatch(target, body);
 
 /**
  * Why the CLI did not create each user: the import's own record, else the dry
@@ -155,7 +152,9 @@ async function runOne(name: string, source: string): Promise<Result> {
     result.grade = grade(key, users, rejections(importRun, dry.json, key), new Set(pw.failed));
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
-    result.grade ??= emptyGrade(key);
+    // A broken setup grades nothing: report it as not run, not as the source's F.
+    if (error instanceof SetupError) result.error = `not run: ${result.error}`;
+    else result.grade ??= emptyGrade(key);
   } finally {
     if (importRun) {
       const undo = await cli(["migrate", "undo", importRun, "--yes", "--json", ...target, ...runsDir]);
@@ -166,7 +165,7 @@ async function runOne(name: string, source: string): Promise<Result> {
       }
     }
   }
-  if (result.error) result.grade!.grade = "F";
+  if (result.error && result.grade) result.grade.grade = "F";
   return result;
 }
 
@@ -184,7 +183,7 @@ try {
     }
     const r = await runOne(job.name, job.source);
     results.push(r);
-    console.log(summaryLine(r.name, r.grade!) + (r.error ? `   ✗ ${r.error}` : ""));
+    console.log(r.grade ? summaryLine(r.name, r.grade) + (r.error ? `   ✗ ${r.error}` : "") : `${r.name.padEnd(14)} —   ${r.error}`);
   }
 } finally {
   await patchConfig(Object.fromEntries(DEST_KEYS.map((k) => [k, snapshot[k]]))).catch((e) =>

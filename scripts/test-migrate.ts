@@ -5,6 +5,17 @@
  *   pnpm test:migrate -p better-auth -v B0        one variation
  *   pnpm test:migrate -p better-auth -v B0 -d all against D1–D5
  *   pnpm test:migrate ... --cli <path/to/cli.ts>  a different CLI checkout
+ *   pnpm test:migrate -p auth0 -v A3 --users-file data/users-eval.json --export-to out.json
+ *       export only: seed every user in the file through that variation's
+ *       source setup, export, save the export file, clean the source up. No
+ *       import. (The import eval's provider exports are made this way.)
+ *   pnpm test:migrate -p auth0 -v A3 --users-file data/users-eval.json --seed-only
+ *       seed only: leave those users in the provider (the migration eval exports
+ *       from them). Undo with:
+ *   pnpm test:migrate -p auth0 --restore-source
+ *       empty the provider and put back its standard users (the variations' afterAll)
+ *
+ * Takes the provider's lock (scripts/lib/lock.ts) for the whole run.
  *
  * Per variation × dest (see .testing-plan.md, "The loop"):
  *   source config → reset + seed source → export → reset source → patch Clerk
@@ -16,8 +27,8 @@
  */
 import { execFileSync } from "node:child_process";
 import { run } from "./lib/run";
-import { clerkRun, cliVersion, DEFAULT_CLI, TARGETS } from "./lib/clerk-run";
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, rmSync } from "node:fs";
+import { clerkRun, cliVersion, DEFAULT_CLI, resolveTargets, TARGETS } from "./lib/clerk-run";
+import { copyFileSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -26,10 +37,13 @@ import { DESTS, DEST_IDS, DEST_KEYS, type DestId } from "./lib/clerk-dest";
 import type { ClerkSummary, TargetName, Variation, VariationModule } from "./lib/variations";
 import { withRetry, type SeedUser } from "./lib/users";
 import { flag, value } from "./lib/args";
+import { clerkLock, lockProviders } from "./lib/lock";
+import { SOURCE, SOURCE_SECRET_KEY } from "./lib/clerk-source";
 
 const CLI = resolve(value("cli")?.replace(/^~/, homedir()) ?? DEFAULT_CLI);
 
 const targetName = (value("target") ?? "dev") as TargetName;
+await resolveTargets();
 const TARGET = TARGETS[targetName];
 if (!TARGET) {
   console.error(`Unknown target "${targetName}". One of ${Object.keys(TARGETS).join(" ")}.`);
@@ -89,7 +103,13 @@ const SOURCES: Record<string, Source> = {
   workos: { cli: "workos", env: () => ({}), args: () => ["--with-identities"] },
   // Clerk as a source: export from the same dev instance the import targets
   // (variations/clerk.ts deletes the seed before the import).
-  clerk: { cli: "clerk", env: () => ({}), args: () => ["--app", TARGET.app, "--instance", TARGET.instance] },
+  // From SOURCE: the destination instance itself (Stage 7), or the migration
+  // eval's separate source instance, which then needs its own key.
+  clerk: {
+    cli: "clerk",
+    env: () => ({}),
+    args: () => ["--app", SOURCE.app, "--instance", SOURCE.instance, ...(SOURCE_SECRET_KEY ? ["--secret-key", SOURCE_SECRET_KEY] : [])],
+  },
 };
 
 /** Writes a service-account JSON to a private temp file, removed when the run exits. */
@@ -110,7 +130,14 @@ const mod = (await import(`./variations/${provider}.ts`)) as VariationModule;
 const { variations } = mod;
 const resetSource = mod.reset ?? (() => script("scripts/reset.ts", ["-p", provider!, "-y"]));
 
+const usersFileOverride = value("usersFile");
+const exportTo = value("exportTo");
+const seedOnly = flag("seedOnly");
 const variationId = value("variation");
+if ((exportTo || seedOnly) && !variationId) {
+  console.error("--export-to and --seed-only need -v <variation>: the source setup to seed through.");
+  process.exit(2);
+}
 const destArg = value("dest");
 const selected = variationId ? variations.filter((v) => v.id === variationId) : variations;
 if (!selected.length) {
@@ -140,7 +167,7 @@ const runDir = resolve("test-results", runName);
 const clerkRunsDir = resolve("clerk-runs", runName);
 mkdirSync(runDir, { recursive: true });
 mkdirSync(clerkRunsDir, { recursive: true });
-const { clerk, cli, settledCount, clerkUsers, verifyPasswords } = clerkRun({
+const { clerk, cli, settledCount, clerkUsers, verifyPasswords, patchConfig: clerkPatch } = clerkRun({
   cli: CLI, secretKey: SECRET_KEY, log: join(runDir, "log.txt"), env: TARGET_ENV,
 });
 const log = (line: string) => {
@@ -157,10 +184,7 @@ async function script(file: string, args: string[], env: Record<string, string> 
 
 const target = ["--app", TARGET.app, "--instance", TARGET.instance];
 
-async function patchDest(body: object) {
-  const r = await cli(["config", "patch", ...target, "--json", JSON.stringify(body), "--yes"]);
-  if (r.code !== 0) throw new Error(`config patch failed (exit ${r.code}); see log.txt`);
-}
+const patchDest = (body: object) => clerkPatch(target, body);
 
 function summarize(users: User[]): ClerkSummary {
   return {
@@ -205,15 +229,17 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
 
   try {
     // Guard: the destination has to start empty, or the counts mean nothing.
-    const existing = await settledCount();
+    // Seeding alone never touches the destination, so it doesn't care what is in it.
+    const existing = seedOnly ? 0 : await settledCount();
     if (existing) throw new Error(`Clerk instance already has ${existing} users — run pnpm teardown first`);
 
     // 1–2. Clean source, then its config, then the seed. Reset first, so it
     // cannot tear down a connection or table the config step just made.
     await resetSource();
     await v.sourceConfig?.();
-    const seed = v.usersFile ? loadSeed(v.usersFile) : allUsers;
-    const seeded = v.users(seed.users);
+    // --users-file seeds that file as it is, skipping the variation's own pick.
+    const seed = usersFileOverride ? loadSeed(usersFileOverride) : v.usersFile ? loadSeed(v.usersFile) : allUsers;
+    const seeded = usersFileOverride ? seed.users : v.users(seed.users);
     // The standard dev instance is capped at 100 users; only 10K runs go past it.
     if (targetName === "dev" && seeded.length > 100)
       throw new Error(`${seeded.length} users is over the dev instance's 100 — use a 10k target`);
@@ -222,6 +248,10 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     if (v.seed) await v.seed(seeded, seed.seedPassword);
     else await script("scripts/seed.ts", ["-p", provider!, "-r"], { SEED_USERS_FILE: usersFile });
     await mod.afterSeed?.(seeded);
+    if (seedOnly) {
+      row.notes = [`seeded ${seeded.length} users and left them in ${provider}`];
+      return row;
+    }
 
     // 3. Export.
     const exp = await cli(["migrate", "export", source.cli, ...(source.args?.() ?? []), "--yes", "--json", ...runsDir], source.env());
@@ -239,6 +269,15 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
 
     // 4. The seed has done its job; the export file is the source of truth now.
     await resetSource();
+    if (exportTo) {
+      const exportRun = exp.json.run.id as string;
+      mkdirSync(dirname(resolve(exportTo)), { recursive: true });
+      copyFileSync(join(clerkRunsDir, exportRun, "export.json"), exportTo);
+      row.exportRun = exportRun;
+      // Deleted, anonymous or unexportable users can make these differ; say so, don't fail.
+      row.notes = [`exported ${row.exported} of ${seeded.length} seeded → ${exportTo}`];
+      return row;
+    }
 
     // 5–6. Destination config, then the dry run as the oracle.
     await patchDest(DESTS[dest]);
@@ -335,14 +374,30 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
 }
 
 // ── main ──
-const snapshot = JSON.parse((await cli(["config", "pull", ...target])).stdout);
+// Restoring touches only the provider (for Clerk, the source instance), not the destination.
+if (flag("restoreSource")) {
+  await lockProviders([provider, ...(provider === "clerk" ? [clerkLock(SOURCE.instance)] : [])], `test:migrate -p ${provider} --restore-source`);
+  await resetSource();
+  await mod.afterAll?.();
+  log(`${provider}: emptied and restored to its standard users`);
+  process.exit(0);
+}
+// The source provider and the Clerk instance it imports into, all at once. Seeding
+// alone needs only the provider. Clerk as a source also locks its source instance
+// (the same lock as the destination's when, as in Stage 7, they are one instance).
+const sourceLock = provider === "clerk" ? [clerkLock(SOURCE.instance)] : [];
+await lockProviders(
+  seedOnly ? [provider, ...sourceLock] : [provider, clerkLock(TARGET.instance), ...sourceLock],
+  `test:migrate -p ${provider}${variationId ? ` -v ${variationId}` : ""}${seedOnly ? " --seed-only" : ""}`,
+);
+const snapshot = seedOnly ? {} : JSON.parse((await cli(["config", "pull", ...target])).stdout);
 writeFileSync(join(runDir, "clerk-config-before.json"), JSON.stringify(snapshot, null, 2));
 const restore = Object.fromEntries(DEST_KEYS.map((k) => [k, snapshot[k]]));
 
 const rows: Row[] = [];
 try {
   for (const v of selected) {
-    const dests = destArg === "all" ? DEST_IDS : destArg ? [destArg as DestId] : (v.dests ?? ["D1"]);
+    const dests = exportTo || seedOnly ? (["D1"] as DestId[]) : destArg === "all" ? DEST_IDS : destArg ? [destArg as DestId] : (v.dests ?? ["D1"]);
     for (const dest of dests) {
       log(`\n── ${v.id} × ${dest}: ${v.describe}`);
       const row = await runOne(v, dest);
@@ -354,8 +409,9 @@ try {
     }
   }
 } finally {
-  await patchDest(restore).catch((e) => log(`!! config restore failed: ${e.message}`));
-  await mod.afterAll?.().catch((e) => log(`!! source restore failed: ${e.message}`));
+  if (!seedOnly) await patchDest(restore).catch((e) => log(`!! config restore failed: ${e.message}`));
+  // --seed-only leaves the seeded users for the caller; --restore-source puts the standard ones back.
+  if (!seedOnly) await mod.afterAll?.().catch((e) => log(`!! source restore failed: ${e.message}`));
 }
 
 const header = `# ${provider} — ${stamp}\n\nCLI: \`${CLI}\` @ ${cliVersion(CLI)}\n\nCLI runs: \`clerk-runs/${runName}/\`\n\n` +
