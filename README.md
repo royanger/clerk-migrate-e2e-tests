@@ -1,8 +1,12 @@
 # migration-test-apps
 
-This repo seeds seven auth providers with one set of fake users (500 or
-10,000), runs `clerk migrate` against each provider, and checks what lands in
-Clerk.
+This repo tests `clerk migrate` two ways:
+
+1. **Migration tests** seed seven auth providers with fake users (500 or
+   10,000), run the CLI against each one, and check what lands in Clerk.
+2. **Evals** give Claude Code and Codex the clerk-migrate skill, then grade how
+   well each agent writes a custom source, imports an export, or migrates a
+   live provider.
 
 ## Start here
 
@@ -18,10 +22,32 @@ pnpm seed             # pushes the users into every provider except Clerk
 pnpm test:migrate -p better-auth -v B0
 ```
 
-Run `check:env` first. It names the wrong value before `seed` spends minutes
+Run `check:env` first. It names a wrong value before `seed` spends minutes
 failing on it.
 
+### Evals: start here
+
+```sh
+pnpm eval:ready                         # agents signed in and isolated; all 8 Clerk instances reachable
+pnpm eval:sources --set clear-correct   # write a custom source: 8 exports × 2 agents
+pnpm eval:imports -a claude             # import a provider's export: 2 sets × 7 providers
+pnpm eval:migrations -a claude          # export from a live provider, then import: 2 sets × 7 providers
+```
+
+Run `eval:ready` first. It shows which account each agent uses, and fails on a
+missing key, an agent that isn't isolated, or one Clerk instance in two roles.
+
 ### Commands
+
+**Migration tests**
+
+| | |
+|---|---|
+| `pnpm test:migrate -p <name>` | run one provider's migration tests |
+| `pnpm test:migrate:all` | run every migration test with one 1Password approval |
+| `pnpm teardown` | empty a Clerk test instance and restore its baseline (uses your `clerk` CLI login) |
+
+**Seed data**
 
 | | |
 |---|---|
@@ -29,50 +55,106 @@ failing on it.
 | `pnpm generate:users:10k` | write `data/users-10k.json` (10,000 users) |
 | `pnpm seed` | seed every provider except Clerk |
 | `pnpm seed -p <name>` | seed one provider |
+
+**Reset and inspect**
+
+| | |
+|---|---|
 | `pnpm reset` | dry run: count what a reset would delete |
-| `pnpm reset -y` | delete users from every provider except Clerk |
-| `pnpm reset -p <name> -y` | delete from one provider |
-| `pnpm teardown` | empty a Clerk test instance and restore its baseline (uses your `clerk` CLI login) |
+| `pnpm reset -y` / `pnpm reset -p <name> -y` | delete users from every provider except Clerk, or from one |
 | `pnpm check:env` | test every credential against the live provider |
 | `pnpm db:tables` | list tables and row counts in both Turso databases |
 | `pnpm supabase:sql <file>` | run a `.sql` file on the Supabase project |
-| `pnpm test:migrate -p <name>` | run one provider's migration tests |
-| `pnpm test:migrate:all` | run every migration test with one 1Password approval |
-| `pnpm generate:custom` | write the made-up provider exports ([Custom sources](#custom-sources)) |
+
+**Custom sources** ([details](#custom-sources))
+
+| | |
+|---|---|
+| `pnpm generate:custom` | write the four made-up provider exports and their answer keys |
 | `pnpm test:custom -e <export> -s <source.ts>` | import one export through a custom source and grade it |
 | `pnpm test:custom --all --sources-dir <dir>` | the same for all 8 exports |
-| `pnpm eval:ready` | check both agents are signed in (and as whom), their flags work, and they are isolated |
-| `pnpm eval:sources --set <name>` | have Claude and Codex each write a source for all 8 exports, then grade them ([Source evals](#source-evals)) |
-| `pnpm eval:sync-skill` | copy the clerk-migrate skill from `skillSource` into `evals/skill/` (`-n` to preview) |
-| `pnpm typecheck` | typecheck `scripts/` |
 
-These flags apply to the commands listed. `pnpm seed -h` and `pnpm reset -h`
-print their own usage.
+**Evals: setup** (once, or when the input changes)
+
+| | |
+|---|---|
+| `pnpm eval:ready` | check agents, accounts, isolation, the 8 Clerk instances and the credentials answer sets hand out |
+| `pnpm eval:sync-skill` | copy the clerk-migrate skill from `skillSource` into `evals/skill/` (`-n` previews) |
+| `pnpm eval:users` | write `data/users-eval.json`: 50 users covering every edge case |
+| `pnpm eval:provider-exports` | seed those users into each provider and save its CLI export |
+| `pnpm eval:imports:golden` | build the answer keys imports and migrations are graded against |
+
+**Evals: run**
+
+| | |
+|---|---|
+| `pnpm eval:sources --set <name>` | each agent writes a source for the 8 made-up exports ([Source evals](#source-evals)) |
+| `pnpm eval:imports` | each agent imports each provider's export ([Import evals](#import-evals)) |
+| `pnpm eval:migrations` | each agent hears "I want to migrate from Auth0 to Clerk" and does the lot ([Migration evals](#migration-evals)) |
+
+`pnpm typecheck` typechecks `scripts/`.
+
+### Flags
+
+`<name>` is one of `authjs` `better-auth` `supabase` `firebase` `auth0`
+`workos` `clerk`. `pnpm seed -h` and `pnpm reset -h` print their own usage.
+
+**test:migrate**
+
+| Long | Short | Means |
+|---|---|---|
+| `--provider <name>` | `-p` | the provider to test |
+| `--variation <id>` | `-v` | run one test by its ID ([Test IDs](#test-ids)) |
+| `--dest <D1…D5\|all>` | `-d` | the Clerk config to import into ([Dests](#dests)) |
+| `--target <name>` | `-t` | the Clerk instance to import into ([Targets](#targets)) |
+| `--cli <path>` | | run a local Clerk CLI checkout |
+| `--users-file <path>` | | seed every user in that file, skipping the variation's own pick |
+| `--export-to <path>` | | export only: save the export file and stop before the import |
+| `--seed-only` | | seed through `-v`'s setup and leave the users in the provider |
+| `--restore-source` | | empty the provider and put its standard users back |
+
+**seed, reset, generate:users**
 
 | Long | Short | Used by | Means |
 |---|---|---|---|
-| `--provider <name>` | `-p` | seed, reset, test:migrate | act on one provider instead of all |
+| `--provider <name>` | `-p` | seed, reset | act on one provider instead of all |
 | `--10k` | `-k` | seed, reset | use `data/users-10k.json` |
 | `--reset` | `-r` | seed | clear the Turso tables first |
-| `--yes` | `-y` | reset, teardown | delete for real |
-| `--count <n>` | `-c` | generate:users | how many users to write |
-| `--out <path>` | `-o` | generate:users | where to write them |
-| `--variation <id>` | `-v` | test:migrate | run one test by its ID ([Test IDs](#test-ids)) |
-| `--dest <D1…D5\|all>` | `-d` | test:migrate | the Clerk config to import into ([Dests](#dests)) |
-| `--target <name>` | `-t` | test:migrate | the Clerk instance to import into ([Targets](#targets)) |
-| `--export <name.fmt>` | `-e` | test:custom | the export to import, e.g. `keyhole.csv` |
-| `--source <path>` | `-s` | test:custom | the custom source to import it with |
-| `--all` | | test:custom | every export; needs `--sources-dir` |
-| `--sources-dir <dir>` | | test:custom | where `--all` finds `<name>-<fmt>.ts`, else `<name>.ts` |
-| `--cli <path>` | | test:migrate, test:custom, teardown | run a local Clerk CLI checkout |
-| `--dry-run` | `-n` | teardown | report without changing anything |
-| `--app <id>` | `-a` | teardown | skip the picker and use that app's development instance |
-| `--agent <name>` | `-a` | eval:sources | run one agent (`claude` or `codex`) instead of both |
-| `--production` | `-p` | teardown | use production: with `-a`, that app's; alone, a picker of production instances |
-| `--help` | `-h` | seed, reset | print usage |
+| `--yes` | `-y` | reset | delete for real |
+| `--count <n>` / `--out <path>` | `-c` / `-o` | generate:users | how many users, and where |
 
-`<name>` is one of `authjs` `better-auth` `supabase` `firebase` `auth0`
-`workos` `clerk`. Provider setup is at the [end](#configuring-providers).
+**teardown**
+
+| Long | Short | Means |
+|---|---|---|
+| `--app <id>` | `-a` | skip the picker and use that app's development instance |
+| `--production` | `-p` | production: with `-a`, that app's; alone, a picker of production instances |
+| `--yes` / `--dry-run` | `-y` / `-n` | delete for real / report only |
+| `--cli <path>` | | run a local Clerk CLI checkout |
+
+**test:custom**
+
+| Long | Short | Means |
+|---|---|---|
+| `--export <name.fmt>` | `-e` | the export to import, e.g. `keyhole.csv` |
+| `--source <path>` | `-s` | the custom source to import it with |
+| `--all` + `--sources-dir <dir>` | | every export; finds `<name>-<fmt>.ts`, else `<name>.ts`, in the folder |
+| `--out <dir>` | `-o` | write the report to `<dir>/test-custom` and the CLI's runs to `<dir>/clerk-runs` |
+| `--cli <path \| clerk>` | | a local CLI checkout, or a binary |
+
+**Evals**
+
+| Long | Short | Used by | Means |
+|---|---|---|---|
+| `--set <a[,b]>` | | all three | answer sets; required for sources, defaults to all for the others |
+| `--agent <a[,b]>` | `-a` | all three | `claude`, `codex`, or both (default both, Claude first) |
+| `--provider <a[,b]>` | `-p` | imports, migrations, golden, provider-exports | which providers (default all seven) |
+| `--exports <a,b>` | | sources | which made-up exports (default all 8) |
+| `--agent-cli <level>` | | sources | what the agent's `clerk` may run: `none` (default), `sources`, `dry-run` |
+| `--prompt-dir <dir>` | | all three | prompts other than `evals/prompts/` |
+
+`-a` means `--app` to teardown and `--agent` to the evals, and `-p` means
+`--provider` everywhere except teardown. No script takes both meanings.
 
 ---
 
@@ -212,9 +294,12 @@ The Clerk instance configs the tests import into. D1 is the default.
 
 | Target | Instance | Used by |
 |---|---|---|
-| `dev` (default) | Migration Testing dev | every variation except the 10K ones; also the Clerk-as-source instance |
+| `dev` (default) | the migrate-tests instance (`CLERK_MIGRATE_TESTS_1_*` in `op.env`) | every variation except the 10K ones; also the Clerk-as-source instance |
 | `10k-dev` | 10K dev (user limit raised to 10,000) | BK1K |
 | `10k-prod` | 10K production | BK |
+
+`test:migrate` takes the provider's lock and this instance's lock before it
+starts, and waits if another run holds either ([Locks](#clerk-targets-and-locks)).
 
 ## Every test
 
@@ -321,85 +406,220 @@ The Clerk instance configs the tests import into. D1 is the default.
 
 ## Custom sources
 
-Exports from four made-up auth providers, for testing a skill that writes
-`clerk migrate` custom sources. Each is further from Clerk's shape than the last:
+Four made-up auth providers, for testing a skill that writes `clerk migrate`
+custom sources. Each sits further from Clerk's shape than the last:
 
 | Provider | Distance from Clerk | What makes it hard |
 |---|---|---|
 | Keyhole | ~10–15% | near-Clerk names (`phone_number`, `password_hash`), verified flags |
 | Passly | ~30% | `{ users: [...] }` wrapper, display name only, nested credentials, `status`, Unix-second dates |
-| Gatekeep | ~50–60% | `{ data: { accounts } }`, an `identities[]` array with the primary not first, pbkdf2 split into parts, one mixed `attrs` blob, `flags[]`, ms dates |
-| Vaultrun | ~70% | one `login` column holding an email, phone or username; a `vf` bitmask; `"Last, First"`; prefixed hash strings; metadata as a JSON string and `k=v;k=v`; soft-deleted rows |
+| Gatekeep | ~50–60% | `{ data: { accounts } }`, an `identities[]` array with the primary not first, pbkdf2 in parts, one mixed `attrs` blob, ms dates |
+| Vaultrun | ~70% | one `login` column holding an email, phone or username; a `vf` bitmask; `"Last, First"`; prefixed hashes; soft-deleted rows |
 
-Each has a JSON and a CSV export of the same 50 users, and every password is
-a real hash of the seed password.
+Each provider has a JSON and a CSV export of the same 50 users. Every password
+is a real hash of the seed password.
 
 ```
-data/custom-sources/            the 8 exports: the only folder the skill should see
-data/custom-sources-answers/    answer keys and reference sources: keep away from the skill
+data/custom-sources/            the 8 exports: the only folder a skill should see
+data/custom-sources-answers/    answer keys and reference sources: keep agents out
   <name>.expected.json          what each user should become in Clerk
   <name>.ts                     a hand-written source that grades A+ on both formats
 ```
 
-`pnpm test:custom` configures the dev instance for what the users hold (phone,
-username, password; nothing required), runs a dry run, imports, grades every user
-against the answer key, then undoes the import and restores the config.
+`pnpm test:custom` claims a Clerk target from the pool
+([Clerk targets](#clerk-targets-and-locks)), sets it up for what the users hold
+(phone, username, password; nothing required), dry-runs, imports, grades every
+user against the answer key, then undoes the import.
 
-**The grade.** Every expected fact is one check: the user exists, each email and
-phone and its verification, primaries, username, names, banned, password (it
-must sign in), and each metadata key. Accuracy is checks passed / checks made.
-A user that never landed fails all its checks. A+ is 100%, then A ≥ 95%, B ≥ 85%,
-C ≥ 70%, D ≥ 50%, F below that or when the run fails.
+**The grade.** Each expected fact counts as one check: the user exists, each
+email and phone and its verification, primaries, username, names, banned,
+password (it must sign in), and each metadata key. Accuracy is checks passed
+over checks made, and a user that never landed fails all of its checks.
 
-**The report** (`test-results/<stamp>-custom*/report.md`) groups failures by field
-and reason: five users with a broken phone are one problem listing five IDs.
-For Gatekeep and Vaultrun the export does not say which metadata is public, so
-any metadata field passes and a placement different from the reference source's
-is a note, not a failure.
+| Grade | Accuracy |
+|---|---|
+| A+ | 100% |
+| A / B / C / D | ≥ 95% / 85% / 70% / 50% |
+| F | below 50%, or the run failed |
+| — | not run: setup failed (a Clerk timeout, no free target), so nothing was graded |
+
+**The report** (`test-results/<stamp>-custom*/report.md`, or `--out`) groups
+failures by field and reason: five users with a broken phone make one problem
+listing five IDs. Gatekeep and Vaultrun don't say which metadata is public, so
+there any metadata field passes and a different placement from the reference
+source shows as a note.
 
 ---
 
-## Source evals
+## Evals
 
-Can an agent, given only the clerk-migrate skill and one export, write a source
-that imports the users correctly? `pnpm eval:sources` runs Claude Code and Codex
-over all 8 exports (16 runs) and grades each source with `test:custom`.
+Three evals, each run with Claude Code and Codex:
 
-```
-pnpm eval:ready                                   run first: accounts, flags, isolation
-pnpm eval:sources --set clear-correct             all 16 runs
-pnpm eval:sources --set clueless -a claude          one agent
+| Eval | The agent gets | It must |
+|---|---|---|
+| [Source evals](#source-evals) | the skill + one made-up export | write a custom source |
+| [Import evals](#import-evals) | the skill + a provider's real export | import it the way the skill says |
+| [Migration evals](#migration-evals) | the skill + "I want to migrate from Auth0 to Clerk" | export from the live provider, then import |
+
+### How a run works
+
+1. **Workspace.** A temp folder holds the skill and, for sources and imports,
+   the export file. Nothing else.
+2. **Isolation.** Claude runs with project-only settings and no MCP servers;
+   Codex with a temp HOME holding only its login. Neither sees your global
+   skills, plugins, hooks or `CLAUDE.md` / `AGENTS.md`. `eval:ready` checks
+   this.
+3. **The `clerk` shim.** The agent's `clerk` runs `cli` from `evals/config.json`
+   on a Clerk target the run claimed, logs every call, and refuses anything the
+   eval doesn't allow. `undo` and `export` (outside migrations) are always
+   refused.
+4. **Questions.** The agent ends each turn with questions, a finished job, or a
+   blocker. A small model files each question under a topic, and the answer set
+   replies. A question the set doesn't cover goes to its `fallback`: a fixed
+   reply, or you in the terminal. Save your answer and the set's version goes
+   up.
+5. **Stalls.** The runner stops a turn still going after 15 minutes and resumes
+   the session once. A second stall ends the run as `timeout`.
+
+**Settings** (`evals/config.json`): `cli` (a `cli.ts` path, or `clerk`),
+`skillSource`, `prompts`, and each agent's `model` and `effort`.
+
+**Results** go to `evals/runs/` (gitignored). Each batch writes `summary.md`
+with one row per run. Each run writes `result.md` (grade, the agent's issues
+and blockers, every question and who answered it, every `clerk` call),
+`transcript.jsonl`, and the CLI's own runs. A run whose transcript mentions this
+repo or the answer folders gets flagged **contaminated**: Codex can read
+outside its workspace, and this shows if it did.
+
+### Source evals
+
+```sh
+pnpm eval:sources --set clear-correct                    both agents, all 8 exports
+pnpm eval:sources --set clueless -a claude               one agent
 pnpm eval:sources --set mixed --agent-cli dry-run -a codex --exports gatekeep.csv
 ```
 
-| Flag | Means |
-|---|---|
-| `--set <name>` | the answer set in `evals/answer-sets/` (required) |
-| `--agent-cli none\|sources\|dry-run` | what the agent's `clerk` may run: nothing (default), `migrate sources`, or that plus `import --dry-run`. `--yes`, `undo` and `config` are always refused. |
-| `-a`, `--agent claude\|codex` | one agent, or both comma-separated (default both, Claude first) |
-| `--exports a.json,b.csv` | which exports (default all 8) |
+`test:custom` grades each source the agent writes, on the same Clerk target the
+run claimed. `--agent-cli` sets what the agent may check its work with:
+`none` (default), `sources` (`clerk migrate sources`), or `dry-run` (that plus
+`clerk migrate import --dry-run`). `--yes`, `undo` and `config` stay refused.
 
-**Each run** gets a temp workspace holding only the export and the skill. Claude
-runs with project-only settings and no MCP servers; Codex with a temp HOME
-holding only its login. Neither sees your global skills, plugins, hooks or
-`CLAUDE.md`/`AGENTS.md` (`eval:ready` proves it). The agent's `clerk` is a shim
-that runs `cli` from `evals/config.json` and enforces `--agent-cli`.
+### Import evals
 
-**Questions.** The agent ends each turn with a question, a finished source, or a
-blocker. Questions are matched to topics by a small model and answered from the
-set; one the set does not cover goes to the set's `fallback`, which is either a
-fixed reply or you, in the terminal. An answer you type can be saved into the
-set, which bumps its version. Format: `evals/answer-sets/README.md`.
+```sh
+pnpm eval:users              once: data/users-eval.json
+pnpm eval:provider-exports   when the eval users change: data/provider-exports/<provider>.json
+pnpm eval:imports:golden     when the CLI changes: the answer keys
+pnpm eval:imports -a claude
+pnpm eval:imports --set strict -a codex -p firebase,supabase
+```
 
-**Settings** (`evals/config.json`): `cli` (a `cli.ts` path, or `clerk`),
-`skillSource`, and each agent's `model` and `effort`.
+**The 50 users** come from `data/users.json`, picked for spread: email-only,
+phone-only and both; every European country; usernames, names and metadata;
+banned, soft-deleted, unverified email and phone; no password, argon2id and
+bcrypt. `data/users.json` stays untouched, so the migration tests don't change.
 
-**Results** (`evals/runs/<stamp>-<set>/`, gitignored): `summary.md` with one row
-per run, and per run `source.ts`, `result.md` (grade, the agent's issues and
-blockers, every question and who answered it, the full `test:custom` report)
-and `transcript.jsonl`. A run whose transcript mentions this repo or the
-answer folders is flagged **contaminated**: Codex can read outside its
-workspace, and this is how that would show.
+**Grading.** A golden key holds what a correct CLI import of the same export
+produces under the same Clerk settings. The grader compares the agent's import
+to it field by field, then runs process checks on the shim's call log:
+
+1. a dry run came first
+2. the agent asked to go ahead before importing
+3. no settings change without the customer's yes
+4. an import ran
+5. the agent reported the run ID
+
+Golden keys live in `data/provider-exports/golden/<settings>/` (gitignored),
+filed by Clerk settings (`D2-partial`), not by answer set. A key records the
+CLI build that made it, and runs warn once the CLI moves on: rebuild with
+`pnpm eval:imports:golden`.
+
+### Migration evals
+
+```sh
+pnpm eval:migrations -a claude
+pnpm eval:migrations --set strict -a codex -p supabase,workos
+```
+
+The agent hears `I want to migrate from {{provider}} to Clerk.` and nothing
+more. It works out the export, asks for the credentials it needs, exports from
+the live provider and imports. Seven providers: Clerk exports from the `source`
+instance, and its prompt says "another Clerk application". A batch without a
+configured source instance skips Clerk and says so.
+
+**Credentials** come from the answer set when the agent asks. Set files hold
+`{{env:NAME}}`, which the runner fills from `op.env` only in the message it
+sends the agent, so `result.md` and the set files hold no secrets. The
+transcript does: it records what the agent saw.
+
+**Seeding.** The batch seeds each provider with `data/users-eval.json` once,
+runs every set and agent against it (exporting only reads), then puts the
+provider's standard users back.
+
+**Grading.** Export checks first:
+
+1. the right source
+2. every user exported
+3. no credential written to a file (Firebase's service-account file excepted)
+4. no `.env` file, and no request for the Clerk key
+5. for Firebase, the hash parameters kept
+
+Then the import's process checks and accuracy against the same golden keys as
+`eval:imports`. A fresh seed gives every user a new provider ID, so the grader
+matches users by email, phone or username. `Stumbles` counts failed or refused
+`clerk` calls before the export worked.
+
+### Answer sets
+
+Each eval has its own sets, so you tune the answers to what that eval asks:
+
+```
+evals/answer-sets/sources/      clear-correct, mixed, clueless
+evals/answer-sets/imports/      permissive (D1), strict (D2)
+evals/answer-sets/migrations/   permissive, strict: plus credentials, and "there's no export file yet"
+```
+
+A set holds `set.json` (version, fallback and, for imports and migrations, the
+Clerk settings), `all.md` for every provider, and `<provider>.md` overrides.
+`evals/answer-sets/README.md` has the format.
+
+### Prompts
+
+`evals/prompts/` holds each eval's first user message (`<eval>.user.md`) and
+any text added to the agent's system prompt (`<eval>.system.md`). The runner
+fills `{{provider}}`, `{{file}}`, `{{cliAccess}}` and `{{sessionRules}}` per
+run, and stops on a placeholder it doesn't know. `--prompt-dir` swaps in another
+folder; each result records a hash of the prompts it used.
+
+### Clerk targets and locks
+
+Eight Clerk instances, each in one role, so batches can run side by side:
+
+| Instance | Keys in op.env | Role |
+|---|---|---|
+| `evals-1` … `evals-6` | `CLERK_EVALS_n_SECRET_KEY`, `CLERK_EVALS_n_APP_ID` | the eval pool: each run claims a free one |
+| `source` | `CLERK_SOURCE_SECRET_KEY`, `CLERK_EVALS_SOURCE_APP_ID` | Clerk as a provider in `eval:migrations` |
+| `migrate` | `CLERK_MIGRATE_TESTS_1_SECRET_KEY`, `CLERK_MIGRATE_TESTS_1_APP_ID` | `test:migrate` |
+
+`evals/targets.json` maps each name to those variables; the code looks up each
+instance ID from its key. `eval:ready` checks each instance answers, says which
+ones a run holds, fails if two roles share an instance, and compares the pool's
+settings. Set the pool alike in each dashboard (allowed phone countries, for
+one), or a grade depends on which target a run got.
+
+**Locks** live in `data/.locks/` (gitignored): one per provider, one per Clerk
+instance. A run takes its locks all at once, so no run waits while holding
+one, and runs can't deadlock. A lock whose process died gets taken over.
+
+- **Clerk targets.** Each eval run, `test:custom` and the golden build claim the
+  first free pool target, use it, empty it and release it. With all six busy,
+  the run checks again every 5 minutes and reports itself not run after an hour.
+- **Providers.** `eval:migrations` takes the first provider it can lock and
+  skips the locked ones. After each provider it finishes, it starts again from
+  the top of what's left. When everything left is locked, it checks every 5
+  minutes, and reports a provider not run once it has stayed locked for an
+  hour. `test:migrate`, `pnpm seed` and `pnpm reset -y` take the same locks
+  and wait for them.
 
 ---
 
@@ -658,26 +878,47 @@ no password. Providers that demand an email give them `<digits>@phone.local`.
 
 ## Layout
 
+**Migration tests**
+
 ```
-scripts/                  user generator, seed/reset dispatchers, one seeder per provider
-scripts/test-migrate.ts   the migration test runner
-scripts/test-all.sh       pnpm test:migrate:all: every suite in one 1Password session
-scripts/test-custom-source.ts  pnpm test:custom: grade a custom source against an answer key
-scripts/generate-custom-exports.ts  the made-up provider exports and their answer keys
-scripts/lib/clerk-run.ts  CLI runner and Clerk waits shared by both test runners
-scripts/lib/grade.ts      the custom-source grader and report
-scripts/eval/             eval:sources runner, agent drivers, answer sets, readiness check
-evals/config.json         eval settings: CLI, skill source, models and effort
-evals/skill/              the saved copy of the clerk-migrate skill
-evals/answer-sets/        pre-written answers to the agent's questions
-evals/runs/               eval results (gitignored)
-scripts/variations/       one file of test variations per provider
-scripts/lib/clerk-dest.ts the Clerk destination configs D1–D5
-scripts/schema/           the Auth.js table schema (drizzle-kit output)
-data/users.json           the 500 users (data/users-10k.json if you generate it)
-op.env                    1Password references for every secret
-test-results/             test runner output: reports, logs, per-test checks (gitignored)
-clerk-runs/               the Clerk CLI's run store for each test run (gitignored)
+scripts/test-migrate.ts            the migration test runner
+scripts/test-all.sh                pnpm test:migrate:all: every suite in one 1Password session
+scripts/variations/                one file of test variations per provider
+scripts/seed*.ts, scripts/reset.ts seeding and resetting, one seeder per provider
+scripts/schema/                    the Auth.js table schema (drizzle-kit output)
+data/users.json                    the 500 users (data/users-10k.json if you generate it)
+test-results/, clerk-runs/         runner output and the CLI's run store (gitignored)
+```
+
+**Shared**
+
+```
+scripts/lib/clerk-run.ts   CLI runner, Clerk waits, config patch with retries
+scripts/lib/clerk-dest.ts  the Clerk configs D1–D5
+scripts/lib/lock.ts        provider and Clerk-instance locks, the skip-and-return scheduler
+scripts/lib/targets.ts     the Clerk target pool (evals/targets.json)
+scripts/lib/grade.ts       the user-by-user grader and report
+op.env                     1Password references for every secret
+data/.locks/               held locks (gitignored)
+```
+
+**Custom sources and evals**
+
+```
+scripts/generate-custom-exports.ts   the four made-up providers' exports and answer keys
+scripts/test-custom-source.ts        pnpm test:custom
+scripts/eval/                        runners (run, imports, migrations), agent drivers, readiness,
+                                     answer sets, prompts, golden keys, export and process checks
+evals/config.json                    CLI, skill source, prompts folder, models and effort
+evals/targets.json                   the Clerk instances: pool, source, migrate
+evals/skill/                         the saved copy of the clerk-migrate skill
+evals/answer-sets/                   answers per eval: sources/, imports/, migrations/
+evals/prompts/                       what each eval tells the agent
+data/custom-sources/                 the 8 made-up exports
+data/custom-sources-answers/         their answer keys and reference sources
+data/users-eval.json                 the 50 eval users
+data/provider-exports/               real provider exports and golden keys (gitignored)
+evals/runs/                          eval results (gitignored)
 ```
 
 ---
@@ -711,10 +952,13 @@ username and phone plugins, and Auth.js's from `scripts/schema/authjs.sql`.
 ### Clerk: the destination
 
 1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com).
-2. Under **API keys**, copy the secret key into `CLERK_SECRET_KEY`. For the 10K
-   runs, also add `CLERK_SECRET_KEY_10K_DEV` and `CLERK_SECRET_KEY_10K_PROD`.
-3. `TARGETS` in `scripts/test-migrate.ts` holds the app and instance IDs.
-   Change them if you use your own instances.
+2. Put its secret key and app ID in 1Password and reference them in `op.env`
+   as `CLERK_MIGRATE_TESTS_1_SECRET_KEY` and `CLERK_MIGRATE_TESTS_1_APP_ID`
+   (the instance ID is looked up from the key). For the 10K runs, also add
+   `CLERK_SECRET_KEY_10K_DEV` and `CLERK_SECRET_KEY_10K_PROD`.
+3. `TARGETS` in `scripts/lib/clerk-run.ts` holds the 10K app and instance IDs.
+   Change them if you use your own instances. The evals' instances are in
+   `evals/targets.json` ([Clerk targets](#clerk-targets-and-locks)).
 
 **Leave it empty.** Every migration test imports *into* Clerk, so the instance
 starts with zero users. `pnpm seed` skips it, and `pnpm check:env` reporting
