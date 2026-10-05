@@ -139,10 +139,20 @@ function checksFor(e: Expected, u: User | undefined, badPasswords: Set<string>, 
 
 /**
  * @param users - Everything in the Clerk instance after the import.
- * @param rejected - Source ID → why the CLI did not create that user.
+ * @param rejected - Source ID (or a lowercased identifier) → why the CLI did not create that user.
  * @param badPasswords - Clerk IDs whose password did not verify.
+ * @param opts.matchBy - "identifiers" when the source was seeded afresh, so its
+ *   IDs differ from the answer key's: users are matched by email, phone or
+ *   username alone, and a different user ID is not a problem.
  */
-export function grade(key: AnswerKey, users: User[], rejected: Map<string, string>, badPasswords: Set<string>): Grade {
+export function grade(
+  key: AnswerKey,
+  users: User[],
+  rejected: Map<string, string>,
+  badPasswords: Set<string>,
+  opts: { matchBy?: "id" | "identifiers" } = {},
+): Grade {
+  const byIdentifiers = opts.matchBy === "identifiers";
   const problems = new Map<string, Problem>();
   const notes = new Map<string, Problem>();
   const add = (into: Map<string, Problem>, field: string, reason: string, id: string, example?: string) => {
@@ -160,16 +170,20 @@ export function grade(key: AnswerKey, users: User[], rejected: Map<string, strin
   let importedCorrect = 0;
   let notImported = 0;
 
+  const idsOf = (e: Expected) =>
+    new Set([...e.emails, ...e.unverifiedEmails, ...e.phones, ...e.unverifiedPhones, e.username, ...(e.identifiers ?? [])].filter(Boolean).map((v) => v!.toLowerCase()));
+  const findByIdentifiers = (mine: Set<string>) =>
+    users.find((c) => !claimed.has(c.id) && [
+      ...c.emailAddresses.map((a) => a.emailAddress), ...c.phoneNumbers.map((p) => p.phoneNumber), c.username ?? "",
+    ].some((v) => mine.has(v.toLowerCase())));
+
   for (const e of key.users) {
-    let u = byExternal.get(e.externalId);
+    let u = byIdentifiers ? findByIdentifiers(idsOf(e)) : byExternal.get(e.externalId);
     let idProblem: string | undefined;
     // A wrong userId mapping still lands the user: find it by identifier so the
     // rest of its fields are graded, and report the ID once.
-    if (!u) {
-      const mine = new Set([...e.emails, ...e.unverifiedEmails, ...e.phones, ...e.unverifiedPhones, e.username].filter(Boolean).map((v) => v!.toLowerCase()));
-      u = users.find((c) => !claimed.has(c.id) && [
-        ...c.emailAddresses.map((a) => a.emailAddress), ...c.phoneNumbers.map((p) => p.phoneNumber), c.username ?? "",
-      ].some((v) => mine.has(v.toLowerCase())));
+    if (!u && !byIdentifiers) {
+      u = findByIdentifiers(idsOf(e));
       if (u) idProblem = `expected ${e.externalId}, got ${show(u.externalId)}`;
     }
     if (u) claimed.add(u.id);
@@ -194,7 +208,8 @@ export function grade(key: AnswerKey, users: User[], rejected: Map<string, strin
     if (!u) {
       // One problem for the user, not one per field it would have had.
       notImported++;
-      add(problems, "user", `not imported: ${rejected.get(e.externalId) ?? rejected.get("*") ?? "no reason recorded"}`, e.externalId);
+      const reason = rejected.get(e.externalId) ?? [...idsOf(e)].map((i) => rejected.get(i)).find(Boolean) ?? rejected.get("*");
+      add(problems, "user", `not imported: ${reason ?? "no reason recorded"}`, e.externalId);
       continue;
     }
     imported++;

@@ -11,6 +11,7 @@
     "eval:provider-exports": "op run --env-file=op.env -- tsx scripts/eval/provider-exports.ts",
     "eval:imports:golden": "op run --env-file=op.env -- tsx scripts/eval/golden.ts",
     "eval:imports": "op run --env-file=op.env -- tsx scripts/eval/imports.ts",
+    "eval:migrations": "op run --env-file=op.env -- tsx scripts/eval/migrations.ts",
     "seed": "op run --env-file=op.env -- tsx scripts/seed.ts",
     "reset": "op run --env-file=op.env -- tsx scripts/reset.ts",
     "teardown": "tsx scripts/teardown.ts",
