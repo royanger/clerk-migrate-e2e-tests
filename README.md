@@ -201,8 +201,9 @@ Clerk instance has to start empty. If it isn't, run `pnpm teardown`.
   must hold 0 users again.
 
 Some tests add their own checks: how names split (J7), which metadata bucket
-holds what (A7, C6, W4), external IDs (A4, A5, A7, W5), or an export that must
-refuse the source's schema (B10, J6).
+holds what (A7, C6, W4), external IDs (A4, A5, A7, W5), verified emails read
+from a renamed column (J6), or an export that must refuse the source's schema
+(B10).
 
 ### Expected failures
 
@@ -364,7 +365,7 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 | J3 | email + GitHub: the exporter ignores account rows, so this exports like J1 | D1 | dev |
 | J4 | phone OTP: verified `<digits>@phone.local` placeholders, which Clerk refuses, so the dry run rejects those users | D1 | dev |
 | J5 | user table renamed to `users`: the exporter's fallback table name | D1 | dev |
-| J6 | snake_case `email_verified` column (a Prisma `@map`): the exporter must refuse it with a clear message *(export expected to fail)* | D1 | dev |
+| J6 | snake_case `email_verified` column (a Prisma `@map`, or legacy NextAuth): the exporter falls back to it, and half the users stay unverified | D1 | dev |
 | J7 | names of one, two and three words | D1 | dev |
 
 ### Better Auth (`-p better-auth`)
