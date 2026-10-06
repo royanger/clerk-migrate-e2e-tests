@@ -6,4 +6,5 @@ test-results
 clerk-runs
 evals/runs
 data/provider-exports
+.clerk/
 data/.locks
