@@ -3,9 +3,8 @@
  * changing its config through the CLI. Shared by seed-clerk.ts and
  * variations/clerk.ts.
  */
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createClerkClient } from "@clerk/backend";
+import { cliArgv, DEFAULT_CLI } from "./clerk-run";
 import { run } from "./run";
 import { TARGETS } from "./clerk-run";
 import { pool, withRetry, type SeedUser } from "./users";
@@ -27,7 +26,8 @@ export const SOURCE = {
 /** Set only when the source is a separate instance from test:migrate's destination. */
 export const SOURCE_SECRET_KEY = process.env.CLERK_AS_SOURCE_SECRET_KEY;
 
-const CLI = join(homedir(), "clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts");
+/** The CLI under test: test-migrate.ts sets MIGRATE_TEST_CLI from --cli. */
+const CLI = () => process.env.MIGRATE_TEST_CLI ?? DEFAULT_CLI;
 
 export const clerkClient = () => createClerkClient({ secretKey: SOURCE_SECRET_KEY ?? process.env[TARGETS.dev.key]! });
 
@@ -87,11 +87,13 @@ export async function deleteAllUsers(clerk = clerkClient()) {
   }
 }
 
-const cli = (args: string[]) =>
-  run("bun", [CLI, "config", ...args, "--app", SOURCE.app, "--instance", SOURCE.instance], {
+const cli = (args: string[]) => {
+  const [bin, ...pre] = cliArgv(CLI());
+  return run(bin, [...pre, "config", ...args, "--app", SOURCE.app, "--instance", SOURCE.instance], {
     ...process.env,
     CLERK_TELEMETRY_DISABLED: "1",
   });
+};
 
 export async function configPull(): Promise<Record<string, unknown>> {
   const { code, stdout, stderr } = await cli(["pull"]);

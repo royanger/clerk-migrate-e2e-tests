@@ -7,8 +7,12 @@
 # and every report is in test-results/<stamp>-<provider>-<target>/report.md.
 #
 # Expects to run under `op run --env-file=op.env` (the package.json script does).
+#
+# Arguments are passed to every test-migrate.ts run, e.g. a CLI checkout other
+# than DEFAULT_CLI:  pnpm test:migrate:all --cli <path/to/cli.ts>
 set -u
 cd "$(dirname "$0")/.."
+EXTRA=("$@")
 
 # Free Supabase projects pause after a week idle; wake it before its turn.
 wake_supabase() {
@@ -33,7 +37,8 @@ declare -a summary
 run() {
   local label=$1; shift
   echo; echo "=== $label  $(date +%H:%M:%S)"
-  tsx scripts/test-migrate.ts "$@"
+  # The +-guard: macOS bash 3.2 treats an empty array as unset under set -u.
+  tsx scripts/test-migrate.ts "$@" ${EXTRA[@]+"${EXTRA[@]}"}
   local code=$?
   summary+=("$(printf '%-24s %s' "$label" "$([ $code = 0 ] && echo pass || echo "FAIL (exit $code)")")")
 }

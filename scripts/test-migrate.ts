@@ -38,15 +38,33 @@ import type { ClerkSummary, TargetName, Variation, VariationModule } from "./lib
 import { withRetry, type SeedUser } from "./lib/users";
 import { flag, value } from "./lib/args";
 import { clerkLock, lockProviders } from "./lib/lock";
+import { resolveTarget, targetSpecs } from "./lib/targets";
 import { SOURCE, SOURCE_SECRET_KEY } from "./lib/clerk-source";
 
 const CLI = resolve(value("cli")?.replace(/^~/, homedir()) ?? DEFAULT_CLI);
+// The variations' own CLI calls (lib/clerk-source.ts) use the same build.
+process.env.MIGRATE_TEST_CLI = CLI;
 
-const targetName = (value("target") ?? "dev") as TargetName;
+const targetName = value("target") ?? "dev";
 await resolveTargets();
-const TARGET = TARGETS[targetName];
+let TARGET: { app: string; instance: string; key: string } | undefined = TARGETS[targetName as TargetName];
+/**
+ * How the variations see the target. A Clerk target from evals/targets.json
+ * (`-t evals-1`, as the slice tests use) is a development instance, so it runs
+ * as `dev` does.
+ */
+let targetKind = targetName as TargetName;
 if (!TARGET) {
-  console.error(`Unknown target "${targetName}". One of ${Object.keys(TARGETS).join(" ")}.`);
+  const specs = targetSpecs();
+  const spec = [...specs.pool, specs.source, specs.migrate].find((t) => t.name === targetName);
+  if (spec) {
+    const t = await resolveTarget(spec);
+    TARGET = { app: t.app, instance: t.instance, key: t.keyEnv };
+    targetKind = "dev";
+  }
+}
+if (!TARGET) {
+  console.error(`Unknown target "${targetName}". One of ${Object.keys(TARGETS).join(" ")}, or a name in evals/targets.json.`);
   process.exit(2);
 }
 const SECRET_KEY = process.env[TARGET.key];
@@ -219,7 +237,7 @@ type Row = {
 async function runOne(v: Variation, dest: DestId): Promise<Row> {
   const row: Row = { variation: v.id, dest, status: "pass", notes: [] };
   if (v.skip) return { ...row, status: "skipped", notes: [v.skip] };
-  if (!(v.targets ?? ["dev"]).includes(targetName))
+  if (!(v.targets ?? ["dev"]).includes(targetKind))
     return { ...row, status: "skipped", notes: [`runs on ${(v.targets ?? ["dev"]).join(", ")} only`] };
   const dir = join(runDir, `${v.id}-${dest}`);
   mkdirSync(dir, { recursive: true });
@@ -241,7 +259,7 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     const seed = usersFileOverride ? loadSeed(usersFileOverride) : v.usersFile ? loadSeed(v.usersFile) : allUsers;
     const seeded = usersFileOverride ? seed.users : v.users(seed.users);
     // The standard dev instance is capped at 100 users; only 10K runs go past it.
-    if (targetName === "dev" && seeded.length > 100)
+    if (targetKind === "dev" && seeded.length > 100)
       throw new Error(`${seeded.length} users is over the dev instance's 100 — use a 10k target`);
     const usersFile = join(dir, "users.json");
     writeFileSync(usersFile, JSON.stringify({ seedPassword: seed.seedPassword, users: seeded }));

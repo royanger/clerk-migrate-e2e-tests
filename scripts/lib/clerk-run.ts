@@ -82,7 +82,8 @@ export function clerkRun(opts: { cli: string; secretKey: string; log: string; en
     const [bin, ...pre] = cliArgv(opts.cli);
     const result = await run(bin, [...pre, ...args], {
       // The target's key, so nothing in the CLI can fall back to another instance.
-      ...process.env, CLERK_TELEMETRY_DISABLED: "1", CLERK_SECRET_KEY: opts.secretKey, ...opts.env, ...env,
+      // CLERK_EXPERIMENTAL: `migrate` is gated until its last slice ships; an ungated build ignores it.
+      ...process.env, CLERK_TELEMETRY_DISABLED: "1", CLERK_SECRET_KEY: opts.secretKey, CLERK_EXPERIMENTAL: "migrate", ...opts.env, ...env,
     }, { timeoutMs });
     appendFileSync(opts.log, `$ clerk ${args.join(" ")}\n${result.stderr}\n`);
     let json: any = null;
