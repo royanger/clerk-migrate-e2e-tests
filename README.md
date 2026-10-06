@@ -45,6 +45,7 @@ missing key, an agent that isn't isolated, or one Clerk instance in two roles.
 |---|---|
 | `pnpm test:migrate -p <name>` | run one provider's migration tests |
 | `pnpm test:migrate:all` | run every migration test with one 1Password approval |
+| `pnpm test:migrate:slice<N>` | one CLI slice's tests, for N in 1, 2, 3, 4a–4e, 5, 6 ([Slice tests](#slice-tests)) |
 | `pnpm teardown` | empty a Clerk test instance and restore its baseline (uses your `clerk` CLI login) |
 
 **Seed data**
@@ -298,8 +299,47 @@ The Clerk instance configs the tests import into. D1 is the default.
 | `10k-dev` | 10K dev (user limit raised to 10,000) | BK1K |
 | `10k-prod` | 10K production | BK |
 
+`-t` also takes any name in `evals/targets.json` (e.g. `-t evals-1`, which the
+[slice tests](#slice-tests) use), run as a development instance like `dev`.
+
 `test:migrate` takes the provider's lock and this instance's lock before it
 starts, and waits if another run holds either ([Locks](#clerk-targets-and-locks)).
+
+### Slice tests
+
+`clerk migrate` ships as a stack of PRs, one per slice, merged one at a time
+(`slice-prs.md` in the CLI feature folder). Each slice has its own suite:
+
+```sh
+pnpm test:migrate:slice1 --cli ~/path/to/cli-slice-1/packages/cli-core/src/cli.ts
+pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
+```
+
+| Slice | What it adds | Its tests |
+|---|---|---|
+| 1 | `import <file>` for Clerk and Supabase files | checks 1.1–1.9: the gate, a Supabase file, a Dashboard CSV, D2 rejects, the dev quota, refusals, duplicates, `--require-password`, Ctrl-C |
+| 2 | `runs`, `undo`, continuing a run | checks 2.1–2.6: runs, undo, re-runs, continuing a partial and an interrupted run, undoing an interrupted one |
+| 3 | `export clerk`, `export supabase` | `test:migrate -p clerk` and `-p supabase` |
+| 4a–4e | Firebase, Auth0, WorkOS, Better Auth, Auth.js | `test:migrate -p <provider>` |
+| 5 | custom sources, `migrate sources` | checks 5.1–5.3, with a made-up export and source of their own |
+| 6 | the gate removed | checks 6.1–6.2, with `CLERK_EXPERIMENTAL` unset |
+
+- **Clerk instances.** Every slice imports into `evals-1`, and Clerk as a
+  provider is the migrate instance (`CLERK_MIGRATE_TESTS_1_*`). The `evals-1`
+  lock keeps the evals off it while a slice runs; slices 3–4e pass
+  `-t evals-1` to `test:migrate`.
+- **`--cli` picks the build**, so a slice runs against its own checkout rather
+  than `DEFAULT_CLI`. Every CLI call sets `CLERK_EXPERIMENTAL=migrate`, which
+  slices 1–5 need.
+- **Slices 1 and 2 have no export command**, so their checks write the import
+  files themselves (`scripts/slices/files.ts`): Supabase rows in the exact
+  shape the CLI's `export supabase` query returns, and a Clerk Dashboard CSV.
+  Real provider data starts at slice 3.
+- Checks run on `evals-1`, which must start empty. It is emptied after every
+  check and its auth config restored at the end. Results
+  go to `test-results/<stamp>-slice<N>/report.md`.
+- A slice's suite also runs against later slices' builds, except check 1.1,
+  which fails once slice 6 removes the gate.
 
 ## Every test
 
