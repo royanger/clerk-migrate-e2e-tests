@@ -26,7 +26,7 @@ import { join, relative, resolve } from "node:path";
 import { value } from "../lib/args";
 import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
 import { claimTarget, targetArgs } from "../lib/targets";
-import { DESTS, type DestId } from "../lib/clerk-dest";
+import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import { deleteAllUsers } from "../lib/clerk-source";
 import { grade, section, type Grade } from "../lib/grade";
 import { claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
@@ -140,7 +140,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     const existing = await clerk.settledCount();
     // A target left with users by a crashed run: empty it rather than grade on top of them.
     if (existing) await deleteAllUsers(clerk.clerk);
-    await clerk.patchConfig(targetArgs(claim.target), DESTS[set.meta.dest as DestId]);
+    await clerk.patchConfig(targetArgs(claim.target), withBaseline(DESTS[set.meta.dest as DestId]));
 
     copyFileSync(exportFile(provider), join(root, "users-export.json"));
     const ws = createWorkspace(root, agent, cfg, [join(root, "users-export.json")], "import", claim.target.secretKey);

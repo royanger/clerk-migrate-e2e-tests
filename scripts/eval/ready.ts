@@ -15,7 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClerkClient } from "@clerk/backend";
 import { run } from "../lib/run";
-import { DEST_KEYS } from "../lib/clerk-dest";
+import { DEST_KEYS, EVAL_BASELINE } from "../lib/clerk-dest";
 import { clerkLock, holderOf } from "../lib/lock";
 import { resolveTarget, sharedInstances, targetArgs, targetSpecs, type ClerkTarget } from "../lib/targets";
 import { claudeAccount, codexAccount, createWorkspace, runTurn } from "./agents";
@@ -76,7 +76,7 @@ line(!shared.length, "clerk roles", shared.length
   : "every pool target, the source and migrate are separate instances");
 
 // The pool targets must behave alike, or a grade depends on which one a run got.
-// Settings each run sets itself (DEST_KEYS) and anything naming the instance are left out.
+// Settings each run sets itself (DEST_KEYS, EVAL_BASELINE) and anything naming the instance are left out.
 if (pool.length > 1) {
   const SKIP = /domain|url|origin|name|logo|favicon|_id$|^id$|created|updated|secret|key|instance|application|^support_email|^config_version$/i;
   const configs = await Promise.all(pool.map(async (t) => {
@@ -85,11 +85,20 @@ if (pool.length > 1) {
   }));
   if (configs.some((c) => !c)) line(false, "pool settings", `config pull failed for ${pool.filter((_, i) => !configs[i]).map((t) => t.name).join(", ")}: is your clerk login on those apps?`);
   else {
-    const keys = [...new Set(configs.flatMap((c) => Object.keys(c!)))].filter((k) => !(DEST_KEYS as readonly string[]).includes(k) && !SKIP.test(k));
+    const keys = [...new Set(configs.flatMap((c) => Object.keys(c!)))].filter((k) => !(DEST_KEYS as readonly string[]).includes(k) && !(k in EVAL_BASELINE) && !SKIP.test(k));
     const differ = keys.filter((k) => new Set(configs.map((c) => JSON.stringify(c![k]))).size > 1);
     line(differ.length ? "warn" : true, "pool settings", differ.length
-      ? `differ between targets on ${differ.join(", ")}: set them alike (e.g. allowed phone countries) in each dashboard`
+      ? `${differ.length} setting(s) differ between targets; make them match in each dashboard:`
       : `the same on all ${pool.length} targets (${keys.length} settings compared)`);
+    // Name which targets differ and how: the odd ones out, against what the rest have.
+    for (const k of differ) {
+      const groups = new Map<string, string[]>();
+      configs.forEach((c, i) => groups.set(JSON.stringify(c![k]), [...(groups.get(JSON.stringify(c![k])) ?? []), pool[i].name]));
+      const sorted = [...groups].sort((a, b) => b[1].length - a[1].length);
+      const fields = (v: string) => Object.entries(JSON.parse(v) ?? {}).map(([f, x]) => `${f}: ${JSON.stringify(x)}`).join(", ") || v;
+      console.log(`    ${k}`);
+      for (const [v, names] of sorted) console.log(`      ${names.join(", ").padEnd(30)} ${fields(v).slice(0, 160)}`);
+    }
   }
 }
 

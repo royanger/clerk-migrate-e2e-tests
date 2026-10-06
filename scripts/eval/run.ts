@@ -26,7 +26,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "../lib/run";
 import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
 import { claimTarget, targetArgs, targetEnv } from "../lib/targets";
-import { configForUsers } from "../lib/clerk-dest";
+import { configForUsers, withBaseline } from "../lib/clerk-dest";
 import { value } from "../lib/args";
 import type { Grade } from "../lib/grade";
 import type { AnswerKey } from "../generate-custom-exports";
@@ -143,7 +143,7 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
     const key = JSON.parse(readFileSync(`data/custom-sources-answers/${provider}.expected.json`, "utf8")) as AnswerKey;
     if (access === "dry-run") {
       const clerk = clerkRun({ cli: cfg.cli, secretKey: claim.target.secretKey, log: join(batchDir, "clerk.log") });
-      await clerk.patchConfig(targetArgs(claim.target), configForUsers(key.users));
+      await clerk.patchConfig(targetArgs(claim.target), withBaseline(configForUsers(key.users)));
     }
     const ws = createWorkspace(root, agent, cfg, [resolve("data/custom-sources", exportName)], access, claim.target.secretKey);
 

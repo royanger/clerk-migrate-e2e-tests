@@ -78,6 +78,19 @@ export const DESTS = {
 export type DestId = keyof typeof DESTS;
 
 /**
+ * Settings every eval run applies with its config, so the pool targets match
+ * whatever their dashboards were left at. Nothing here changes which users
+ * import; it keeps the instances alike. When eval:ready reports a setting
+ * differing between targets, add it here.
+ */
+export const EVAL_BASELINE = {
+  auth_biometric: { used_for_sign_in: false, enrollment_prompt_after_sign_in: false, enrollment_prompt_after_sign_up: false },
+} as const;
+
+/** A config patch with the eval baseline applied. */
+export const withBaseline = (body: object) => ({ ...EVAL_BASELINE, ...body });
+
+/**
  * A config that turns on what `users` hold (phone, username, password) and
  * requires nothing, so every valid user can land. Users with `skip` are ignored.
  */

@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { clerkRun, cliVersion, DEFAULT_CLI, SetupError } from "./lib/clerk-run";
-import { configForUsers, DEST_KEYS } from "./lib/clerk-dest";
+import { configForUsers, DEST_KEYS, withBaseline } from "./lib/clerk-dest";
 import { grade, section, summaryLine, type Grade } from "./lib/grade";
 import { flag, value } from "./lib/args";
 import { claimTarget, targetArgs } from "./lib/targets";
@@ -125,7 +125,7 @@ async function runOne(name: string, source: string): Promise<Result> {
     if (existing) throw new Error(`Clerk instance already has ${existing} users — run pnpm teardown first`);
     const config = configForUsers(key.users);
     writeFileSync(join(dir, "clerk-config.json"), JSON.stringify(config, null, 2));
-    await patchConfig(config);
+    await patchConfig(withBaseline(config));
 
     const args = ["migrate", "import", file, "--source", source, "--allow-partial", "--json", ...target, ...runsDir];
     const dry = await cli([...args, "--dry-run"]);

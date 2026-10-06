@@ -28,7 +28,7 @@ import { rowIdentifiers, sourceIdOf } from "../lib/identifiers";
 import { clerkRun, cliVersion } from "../lib/clerk-run";
 import { claimTarget, targetArgs } from "../lib/targets";
 import { deleteAllUsers } from "../lib/clerk-source";
-import { DESTS, type DestId } from "../lib/clerk-dest";
+import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import type { AnswerKey, Expected } from "../generate-custom-exports";
 import { listSets, loadSet, setsDir, type AnswerSet } from "./answers";
 import { loadConfig } from "./config";
@@ -118,7 +118,7 @@ async function main() {
     for (const [settings, { dest, allowPartial, usedBy }] of combos) {
       if (!DESTS[dest]) throw new Error(`${usedBy.join(", ")}: dest "${dest}" is not one of ${Object.keys(DESTS).join(" ")}`);
       console.log(`${settings} (used by ${usedBy.join(", ")})`);
-      await patch(DESTS[dest]);
+      await patch(withBaseline(DESTS[dest]));
       for (const provider of providers) {
         const file = exportFile(provider);
         const label = `${settings.padEnd(11)} ${provider.padEnd(12)}`;
