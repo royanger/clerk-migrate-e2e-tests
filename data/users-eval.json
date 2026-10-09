@@ -1,0 +1,773 @@
+{
+  "seedPassword": "Kk4aPMeiaRpAs2OeX1NE",
+  "count": 50,
+  "users": [
+    {
+      "id": "u0315",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+447836887904",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0393",
+      "group": "both",
+      "email": "leta.roberts393@example.com",
+      "phone": "+4915163873571",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": false,
+      "phoneVerified": true,
+      "metadata": {
+        "user": {
+          "theme": "dark",
+          "onboarding": true
+        }
+      }
+    },
+    {
+      "id": "u0349",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+33680630238",
+      "username": "morgan_wilderman",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0397",
+      "group": "both",
+      "email": "armando.johns397@example.com",
+      "phone": "+34621582340",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0359",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+393432227107",
+      "username": "henriette_strosin",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true,
+      "metadata": {
+        "app": {
+          "plan": "enterprise",
+          "crm_id": "hs_40213"
+        }
+      }
+    },
+    {
+      "id": "u0419",
+      "group": "both",
+      "email": "nelson.kozey419@example.com",
+      "phone": "+31657127021",
+      "username": "nelson_kozey36",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0362",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+46701743423",
+      "username": "alexis.mcclure49",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0431",
+      "group": "both",
+      "email": "bethel.kuhlman431@example.com",
+      "phone": "+353894361045",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "metadata": {
+        "public": {
+          "tier": "gold"
+        }
+      }
+    },
+    {
+      "id": "u0004",
+      "group": "email-only",
+      "email": "devonte.daugherty4@example.com",
+      "phone": null,
+      "username": "devonte_daugherty20",
+      "firstName": "Devonte",
+      "lastName": "Daugherty",
+      "fullName": "Devonte Daugherty",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "banned": true
+    },
+    {
+      "id": "u0007",
+      "group": "email-only",
+      "email": "lukas.hackett7@example.com",
+      "phone": null,
+      "username": "lukas.hackett",
+      "firstName": "Lukas",
+      "lastName": "Hackett",
+      "fullName": "Lukas Hackett",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "banned": true
+    },
+    {
+      "id": "u0010",
+      "group": "email-only",
+      "email": "dudley.lubowitz10@example.com",
+      "phone": null,
+      "username": "dudley_lubowitz",
+      "firstName": "Dudley",
+      "lastName": "Lubowitz",
+      "fullName": "Dudley Lubowitz",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "banned": true,
+      "metadata": {
+        "user": {
+          "theme": "light"
+        },
+        "app": {
+          "plan": "team",
+          "seats": 12
+        },
+        "public": {
+          "tier": "silver",
+          "badge": "early"
+        }
+      }
+    },
+    {
+      "id": "u0014",
+      "group": "email-only",
+      "email": "gregory.feil14@example.com",
+      "phone": null,
+      "username": "gregory.feil",
+      "firstName": "Gregory",
+      "lastName": "Feil",
+      "fullName": "Gregory Feil",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "deleted": true
+    },
+    {
+      "id": "u0017",
+      "group": "email-only",
+      "email": "annette.johnson17@example.com",
+      "phone": null,
+      "username": "annette_johnson",
+      "firstName": "Annette",
+      "lastName": "Johnson",
+      "fullName": "Annette Johnson",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "deleted": true
+    },
+    {
+      "id": "u0020",
+      "group": "email-only",
+      "email": "keagan.swaniawski20@example.com",
+      "phone": null,
+      "username": "keagan_swaniawski6",
+      "firstName": "Keagan",
+      "lastName": "Swaniawski",
+      "fullName": "Keagan Swaniawski",
+      "hasPassword": true,
+      "emailVerified": false,
+      "phoneVerified": false,
+      "metadata": {
+        "user": {
+          "theme": "dark",
+          "onboarding": true
+        }
+      }
+    },
+    {
+      "id": "u0024",
+      "group": "email-only",
+      "email": "abbie.jacobson24@example.com",
+      "phone": null,
+      "username": "abbie_jacobson0",
+      "firstName": "Abbie",
+      "lastName": "Jacobson",
+      "fullName": "Abbie Jacobson",
+      "hasPassword": true,
+      "emailVerified": false,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0027",
+      "group": "email-only",
+      "email": "anna.funk27@example.com",
+      "phone": null,
+      "username": "anna_funk45",
+      "firstName": "Anna",
+      "lastName": "Funk",
+      "fullName": "Anna Funk",
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0030",
+      "group": "email-only",
+      "email": "selena.langworth30@example.com",
+      "phone": null,
+      "username": "selena.langworth80",
+      "firstName": "Selena",
+      "lastName": "Langworth",
+      "fullName": "Selena Langworth",
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "metadata": {
+        "app": {
+          "plan": "enterprise",
+          "crm_id": "hs_40213"
+        }
+      }
+    },
+    {
+      "id": "u0034",
+      "group": "email-only",
+      "email": "dustin.turcotte34@example.com",
+      "phone": null,
+      "username": "dustin.turcotte41",
+      "firstName": "Dustin",
+      "lastName": "Turcotte",
+      "fullName": "Dustin Turcotte",
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0037",
+      "group": "email-only",
+      "email": "cade.harris37@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": "Cade",
+      "lastName": "Harris",
+      "fullName": "Cade Harris",
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0040",
+      "group": "email-only",
+      "email": "eric.hirthe40@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": "Eric",
+      "lastName": "Hirthe",
+      "fullName": "Eric Hirthe",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "passwordFormat": "argon2id",
+      "metadata": {
+        "public": {
+          "tier": "gold"
+        }
+      }
+    },
+    {
+      "id": "u0044",
+      "group": "email-only",
+      "email": "emmalee.casper-king44@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": "Emmalee",
+      "lastName": "Casper-King",
+      "fullName": "Emmalee Casper-King",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "passwordFormat": "argon2id"
+    },
+    {
+      "id": "u0047",
+      "group": "email-only",
+      "email": "enoch.lockman47@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": "Enoch",
+      "lastName": "Lockman",
+      "fullName": "Enoch Lockman",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "passwordFormat": "argon2id"
+    },
+    {
+      "id": "u0050",
+      "group": "email-only",
+      "email": "velva.o'keefe50@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": "Velva",
+      "lastName": "O'Keefe",
+      "fullName": "Velva O'Keefe",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "passwordFormat": "bcrypt",
+      "metadata": {
+        "user": {
+          "theme": "light"
+        },
+        "app": {
+          "plan": "team",
+          "seats": 12
+        },
+        "public": {
+          "tier": "silver",
+          "badge": "early"
+        }
+      }
+    },
+    {
+      "id": "u0001",
+      "group": "email-only",
+      "email": "eileen.hyatt1@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "passwordFormat": "bcrypt"
+    },
+    {
+      "id": "u0002",
+      "group": "email-only",
+      "email": "peyton.cruickshank2@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0003",
+      "group": "email-only",
+      "email": "destini.moore3@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "metadata": {
+        "user": {
+          "theme": "dark",
+          "onboarding": true
+        }
+      }
+    },
+    {
+      "id": "u0005",
+      "group": "email-only",
+      "email": "lisa.dietrich5@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0006",
+      "group": "email-only",
+      "email": "virginie.franey6@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0008",
+      "group": "email-only",
+      "email": "beatrice.jenkins8@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "metadata": {
+        "app": {
+          "plan": "enterprise",
+          "crm_id": "hs_40213"
+        }
+      }
+    },
+    {
+      "id": "u0009",
+      "group": "email-only",
+      "email": "magnus.hintz9@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0011",
+      "group": "email-only",
+      "email": "leslie.kessler11@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0012",
+      "group": "email-only",
+      "email": "bessie.mann12@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false,
+      "metadata": {
+        "public": {
+          "tier": "gold"
+        }
+      }
+    },
+    {
+      "id": "u0013",
+      "group": "email-only",
+      "email": "brenda.white13@example.com",
+      "phone": null,
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": false
+    },
+    {
+      "id": "u0301",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+16285550175",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0302",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+12125550180",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true,
+      "metadata": {
+        "user": {
+          "theme": "light"
+        },
+        "app": {
+          "plan": "team",
+          "seats": 12
+        },
+        "public": {
+          "tier": "silver",
+          "badge": "early"
+        }
+      }
+    },
+    {
+      "id": "u0303",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+15145550159",
+      "username": null,
+      "firstName": "Dianna",
+      "lastName": "Mayert",
+      "fullName": "Dianna Mayert",
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0304",
+      "group": "phone-only",
+      "email": null,
+      "phone": "+14375550134",
+      "username": "zackery_howe",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": false,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0379",
+      "group": "both",
+      "email": "kaitlin.rohan379@example.com",
+      "phone": "+12125550109",
+      "username": "kaitlin.rohan15",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": true,
+      "metadata": {
+        "user": {
+          "theme": "dark",
+          "onboarding": true
+        }
+      }
+    },
+    {
+      "id": "u0382",
+      "group": "both",
+      "email": "jordyn.padberg-grimes382@example.com",
+      "phone": "+15145550118",
+      "username": "jordyn_padberg-grimes",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": false,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0386",
+      "group": "both",
+      "email": "candida.kessler386@example.com",
+      "phone": "+13125550172",
+      "username": "candida_kessler",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0392",
+      "group": "both",
+      "email": "addison.schaefer392@example.com",
+      "phone": "+17185550184",
+      "username": "addison.schaefer",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true,
+      "metadata": {
+        "app": {
+          "plan": "enterprise",
+          "crm_id": "hs_40213"
+        }
+      }
+    },
+    {
+      "id": "u0396",
+      "group": "both",
+      "email": "jarvis.monahan396@example.com",
+      "phone": "+16465550106",
+      "username": "jarvis_monahan",
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0378",
+      "group": "both",
+      "email": "emil.dickens378@example.com",
+      "phone": "+12125550153",
+      "username": null,
+      "firstName": "Emil",
+      "lastName": "Dickens",
+      "fullName": "Emil Dickens",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0381",
+      "group": "both",
+      "email": "arianna.kiehn381@example.com",
+      "phone": "+13125550130",
+      "username": null,
+      "firstName": "Arianna",
+      "lastName": "Kiehn",
+      "fullName": "Arianna Kiehn",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true,
+      "metadata": {
+        "public": {
+          "tier": "gold"
+        }
+      }
+    },
+    {
+      "id": "u0384",
+      "group": "both",
+      "email": "noelia.schaden384@example.com",
+      "phone": "+16285550107",
+      "username": null,
+      "firstName": "Noelia",
+      "lastName": "Schaden",
+      "fullName": "Noelia Schaden",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0388",
+      "group": "both",
+      "email": "timothy.gusikowski388@example.com",
+      "phone": "+14385550106",
+      "username": null,
+      "firstName": "Timothy",
+      "lastName": "Gusikowski",
+      "fullName": "Timothy Gusikowski",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0391",
+      "group": "both",
+      "email": "oma.dietrich391@example.com",
+      "phone": "+14375550145",
+      "username": null,
+      "firstName": "Oma",
+      "lastName": "Dietrich",
+      "fullName": "Oma Dietrich",
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0376",
+      "group": "both",
+      "email": "jefferey.jast376@example.com",
+      "phone": "+16285550120",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0377",
+      "group": "both",
+      "email": "mossie.gislason377@example.com",
+      "phone": "+17735550123",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    },
+    {
+      "id": "u0380",
+      "group": "both",
+      "email": "kendall.purdy380@example.com",
+      "phone": "+17185550118",
+      "username": null,
+      "firstName": null,
+      "lastName": null,
+      "fullName": null,
+      "hasPassword": true,
+      "emailVerified": true,
+      "phoneVerified": true
+    }
+  ]
+}

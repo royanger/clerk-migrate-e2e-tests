@@ -16,6 +16,7 @@
  * before touching anything.
  */
 import { PROVIDERS, selectProviders, type Provider } from "./lib/providers";
+import { lockProviders } from "./lib/lock";
 import { pool, progressBar, reportFailures } from "./lib/users";
 import { flag, spell } from "./lib/args";
 
@@ -43,7 +44,7 @@ type Plan = {
 
 async function planClerk(): Promise<Plan> {
   const { createClerkClient } = await import("@clerk/backend");
-  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const clerk = createClerkClient({ secretKey: process.env.CLERK_MIGRATE_TESTS_1_SECRET_KEY! });
 
   const ids: string[] = [];
   for (let offset = 0; ; offset += 500) {
@@ -52,7 +53,7 @@ async function planClerk(): Promise<Plan> {
     ids.push(...data.map((u) => u.id));
   }
   return {
-    where: "the Clerk instance for CLERK_SECRET_KEY",
+    where: "the Clerk instance for CLERK_MIGRATE_TESTS_1_SECRET_KEY",
     ids,
     remove: async (batch) => {
       const failures = await pool(
@@ -278,6 +279,8 @@ async function reset(provider: Provider) {
 }
 
 const targets = selectProviders("reset");
+// Only a real reset changes anything; the dry run just counts.
+if (confirmed) await lockProviders(targets, `pnpm reset -p ${targets.join(",")}`);
 
 if (!confirmed) console.log("Dry run — counting only. Add --yes (-y) to actually delete.");
 

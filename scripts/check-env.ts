@@ -73,9 +73,9 @@ for (const [group, urlKey, tokenKey] of [
 }
 
 // ── Clerk ────────────────────────────────────────────────────────────────────
-await check("Clerk", "secret key", ["CLERK_SECRET_KEY"], async () => {
+await check("Clerk", "secret key", ["CLERK_MIGRATE_TESTS_1_SECRET_KEY"], async () => {
   const { createClerkClient } = await import("@clerk/backend");
-  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const clerk = createClerkClient({ secretKey: process.env.CLERK_MIGRATE_TESTS_1_SECRET_KEY! });
   return `${await clerk.users.getCount()} users in instance`;
 });
 

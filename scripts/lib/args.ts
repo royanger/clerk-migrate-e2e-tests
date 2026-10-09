@@ -20,6 +20,23 @@ export const FLAGS = {
   variation: ["--variation", "-v"],
   dest: ["--dest", "-d"],
   target: ["--target", "-t"],
+  export: ["--export", "-e"],
+  source: ["--source", "-s"],
+  all: ["--all"],
+  sourcesDir: ["--sources-dir"],
+  set: ["--set"],
+  agentCli: ["--agent-cli"],
+  /* `-a` is `app` for teardown and `agents` for the evals; like `-p`, the two
+   * never run in the same script. */
+  agents: ["--agents", "--agent", "-a"],
+  exports: ["--exports"],
+  promptDir: ["--prompt-dir"],
+  lenient: ["--lenient"],
+  expect: ["--expect"],
+  usersFile: ["--users-file"],
+  seedOnly: ["--seed-only"],
+  restoreSource: ["--restore-source"],
+  exportTo: ["--export-to"],
 } as const;
 
 type Name = keyof typeof FLAGS;

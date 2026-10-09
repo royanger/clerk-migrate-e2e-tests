@@ -4,3 +4,7 @@ node_modules
 .DS_Store
 test-results
 clerk-runs
+evals/runs
+data/provider-exports
+.clerk/
+data/.locks

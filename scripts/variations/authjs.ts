@@ -113,10 +113,12 @@ export const variations: Variation[] = [
   },
   {
     id: "J6",
-    describe: "snake_case `email_verified` column (a Prisma @map): the exporter should refuse clearly",
+    describe: "snake_case `email_verified` column (a Prisma @map, or legacy NextAuth): the exporter falls back to it",
     sourceConfig: schema((sql) => sql.replaceAll("`emailVerified`", "`email_verified`")),
-    users: everyNth(10),
-    expectExportFailure: true,
+    // Half verified, half not: a misread column would make every user verified
+    // (SQLite reads a missing quoted column as a string literal) or none.
+    users: (all) => withEmail(all).slice(0, 40).map((u, i) => ({ ...u, emailVerified: i % 2 === 0 })),
+    expect: expectLanded({ ...authjs, withVerifiedEmail: (seeded) => seeded.filter((u) => u.emailVerified).length }),
   },
   {
     id: "J7",

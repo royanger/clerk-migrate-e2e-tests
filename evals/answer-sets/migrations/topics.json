@@ -1,0 +1,15 @@
+{
+  "consent": "Whether to go ahead and import the users now.",
+  "who-runs": "Whether the agent runs the import command itself, or hands the command to the customer to run.",
+  "rejects": "What to do about users the dry run rejects: fix the export, change the instance's settings, or import the rest and skip them.",
+  "settings-change": "Whether the agent may change the Clerk instance's settings, such as with clerk config patch.",
+  "target": "Which Clerk application or instance (development or production) to import into.",
+  "source": "Which platform the export came from, or which source to import it with.",
+  "passwords": "Users arriving without passwords, or with passwords Clerk cannot verify, who will need to reset them.",
+  "social": "Social or OAuth sign-ins, which are not carried over.",
+  "cleanup": "Deleting the run folders or export files the import leaves behind.",
+  "summary": "Confirming the agent's summary of what will be imported and what will not carry over.",
+  "credentials": "The keys, client secrets, connection strings, auth tokens or service-account files needed to read users from the source platform.",
+  "export-options": "Optional extras when exporting from the source platform, such as also exporting OAuth identities.",
+  "clerk-key": "The Clerk secret key, API key or login for the destination Clerk instance."
+}

@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "description": "Export from the provider, then import, with everything on (D1). Credentials when asked; yes to importing, no to changing settings.",
+  "fallback": "ask-human",
+  "dest": "D1",
+  "allowPartial": true
+}

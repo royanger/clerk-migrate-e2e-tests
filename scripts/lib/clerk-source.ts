@@ -3,18 +3,33 @@
  * changing its config through the CLI. Shared by seed-clerk.ts and
  * variations/clerk.ts.
  */
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createClerkClient } from "@clerk/backend";
+import { cliArgv, DEFAULT_CLI } from "./clerk-run";
 import { run } from "./run";
+import { TARGETS } from "./clerk-run";
 import { pool, withRetry, type SeedUser } from "./users";
 
-/** The dev instance that is both source and destination for Stage 7. */
-export const SOURCE = { app: "app_3HYFnu4WUmQ1p5DS301lefhySiO", instance: "ins_3HYFnwsybLbCpZ3iqN5yt4odmrx" };
+/**
+ * The Clerk instance used as a migration source. For test:migrate it is the
+ * migrate instance, which is also the destination (Stage 7). eval:migrations
+ * points it at its own source instance through CLERK_AS_SOURCE_{SECRET_KEY,APP,INSTANCE}.
+ */
+export const SOURCE = {
+  // Read when used, not on import: TARGETS.dev's instance ID is only known after resolveTargets().
+  get app() {
+    return process.env.CLERK_AS_SOURCE_APP ?? TARGETS.dev.app;
+  },
+  get instance() {
+    return process.env.CLERK_AS_SOURCE_INSTANCE ?? TARGETS.dev.instance;
+  },
+};
+/** Set only when the source is a separate instance from test:migrate's destination. */
+export const SOURCE_SECRET_KEY = process.env.CLERK_AS_SOURCE_SECRET_KEY;
 
-const CLI = join(homedir(), "clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts");
+/** The CLI under test: test-migrate.ts sets MIGRATE_TEST_CLI from --cli. */
+const CLI = () => process.env.MIGRATE_TEST_CLI ?? DEFAULT_CLI;
 
-export const clerkClient = () => createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+export const clerkClient = () => createClerkClient({ secretKey: SOURCE_SECRET_KEY ?? process.env[TARGETS.dev.key]! });
 
 /** A fixed TOTP secret and backup codes, so an MFA user is reproducible. */
 export const TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
@@ -59,9 +74,11 @@ export async function createSeedUser(u: SeedUser, seedPassword: string) {
   return user;
 }
 
-/** Deletes every user in the instance. Only ever pointed at the test instance. */
-export async function deleteAllUsers() {
-  const clerk = clerkClient();
+/**
+ * Deletes every user in an instance: the source instance by default, or the
+ * test instance `clerk` is a client for. Only ever pointed at test instances.
+ */
+export async function deleteAllUsers(clerk = clerkClient()) {
   for (;;) {
     const { data } = await withRetry(() => clerk.users.getUserList({ limit: 100 }), 8);
     if (!data.length) return;
@@ -70,11 +87,13 @@ export async function deleteAllUsers() {
   }
 }
 
-const cli = (args: string[]) =>
-  run("bun", [CLI, "config", ...args, "--app", SOURCE.app, "--instance", SOURCE.instance], {
+const cli = (args: string[]) => {
+  const [bin, ...pre] = cliArgv(CLI());
+  return run(bin, [...pre, "config", ...args, "--app", SOURCE.app, "--instance", SOURCE.instance], {
     ...process.env,
     CLERK_TELEMETRY_DISABLED: "1",
   });
+};
 
 export async function configPull(): Promise<Record<string, unknown>> {
   const { code, stdout, stderr } = await cli(["pull"]);
