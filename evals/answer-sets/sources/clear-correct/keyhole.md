@@ -21,3 +21,6 @@ They mean the same as Clerk's: `public_metadata` → public, `private_metadata` 
 
 ## dates (correct)
 `created_at` is ISO 8601 in UTC.
+
+## names (correct)
+`first_name` and `last_name`. Either can be null.

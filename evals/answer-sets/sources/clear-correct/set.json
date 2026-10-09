@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "Every answer clear and correct: the best case for the agent.",
   "fallback": "ask-human"
 }

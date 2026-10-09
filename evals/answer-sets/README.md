@@ -34,6 +34,19 @@ topics.json      topic → what it covers; the runner matches questions to these
 - **Secrets:** write `{{env:NAME}}`; it is filled in from the environment
   (`op.env`) only in the message sent to the agent, so set files and `result.md`
   never hold the value.
+- **`## late`:** not an answer to a question. The runner sends it once, unasked,
+  the first time the agent says it's done, as the customer changing their
+  mind. The agent has to update its source.
+- **`expect` (eval:sources, in set.json):** when a set's answers change what's
+  right, say how, per provider and answer-key user ID. Each field replaces
+  the answer key's, and `null` removes it. Other sets still grade against the
+  plain key:
+
+  ```json
+  "expect": { "vaultrun": { "100295": { "skip": null, "banned": true } } }
+  ```
+- **Holdout providers:** frostline and nimbus. Don't tune the skill's wording or
+  examples on their results, or they stop showing whether it generalises.
 - **version:** bump it when you change a set. Every run records the set's name,
   version and a content hash, so results always say exactly what the agent was
   told. An answer you save during an eval bumps it for you.

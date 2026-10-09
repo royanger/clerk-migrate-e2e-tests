@@ -4,8 +4,8 @@ Everyone's email is verified. We require it at sign-up.
 ## phone-verification (correct)
 `mobileConfirmed` is true when the mobile number is verified.
 
-## hasher (unknown)
-No idea, the dev who set it up left.
+## hasher (wrong)
+They're all bcrypt.
 
 ## shape (correct)
 The JSON has the users under a `users` key. The CSV has a header row.
@@ -21,3 +21,6 @@ yes
 
 ## identifiers (added 2026-10-05)
 Enable usernames
+
+## dates (correct)
+`createdAt` is Unix seconds.

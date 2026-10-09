@@ -1,5 +1,30 @@
 {
-  "version": 9,
+  "version": 16,
   "description": "Some answers correct, some wrong, some unknown: what a busy customer gives.",
-  "fallback": "ask-human"
+  "fallback": "ask-human",
+  "expect": {
+    "keyhole": {
+      "kh_2b9f3de6efaba8079becf376": {
+        "phones": [
+          "+16475550101"
+        ],
+        "unverifiedPhones": [],
+        "primaryPhone": "+16475550101"
+      }
+    },
+    "vaultrun": {
+      "100295": {
+        "skip": null,
+        "banned": true
+      },
+      "100337": {
+        "skip": null,
+        "banned": true
+      },
+      "100344": {
+        "skip": null,
+        "banned": true
+      }
+    }
+  }
 }
