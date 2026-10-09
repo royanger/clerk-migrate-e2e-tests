@@ -6,7 +6,7 @@
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { runTurn, setRound, type CliAccess, type TurnOutput, type Workspace } from "./agents";
-import { loadSet, lookup, resolveEnv, saveAnswer, type AnswerSet } from "./answers";
+import { LATE, loadSet, lookup, resolveEnv, saveAnswer, type AnswerSet } from "./answers";
 import { classify } from "./classify";
 import type { AgentName, EvalConfig } from "./config";
 
@@ -134,6 +134,7 @@ export async function runSession(opts: {
   const s: Session = { status: "error", rounds: 0, qa: [], issues: [] };
   let prompt = opts.prompt;
   let session: string | undefined;
+  let late = lookup(opts.answers.set, opts.provider, LATE);
   for (let round = 1; ; round++) {
     s.rounds = round;
     setRound(opts.ws, round);
@@ -163,6 +164,15 @@ export async function runSession(opts: {
       return s;
     }
     s.issues.push(...turn.output.issues.map((i) => (round > 1 ? `[round ${round}] ${i}` : i)));
+    if (turn.output.status === "done" && late && round < MAX_ROUNDS) {
+      s.qa.push({
+        round, question: "(nothing asked: the customer wrote in after the agent said it was done)", topics: [LATE],
+        answer: late.text, by: "set", tags: late.tag ? [`${LATE}: ${late.tag}`] : [],
+      });
+      prompt = `The customer wrote back:\n\n${resolveEnv(late.text)}`;
+      late = undefined;
+      continue;
+    }
     if (turn.output.status !== "question") {
       s.status = turn.output.status;
       return s;

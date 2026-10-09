@@ -44,7 +44,23 @@ export function letter(accuracy: number): string {
 const show = (v: unknown) => (v === undefined || v === null || v === "" ? "none" : JSON.stringify(v));
 
 /** Checks for one expected user against what Clerk holds (`u` absent = not imported). */
-function checksFor(e: Expected, u: User | undefined, badPasswords: Set<string>, placement: AnswerKey["metadataPlacement"]): Check[] {
+/**
+ * What the agent was never told, so its safe default shouldn't count against it:
+ *   email / phone  no informative answer about verification: importing as
+ *                  unverified is what the skill says to do, so it is a note
+ *   placement      no informative answer about metadata: where each key landed
+ *                  is a note, as long as it landed
+ */
+export type Lenient = { email?: boolean; phone?: boolean; placement?: boolean };
+
+function checksFor(
+  e: Expected,
+  u: User | undefined,
+  badPasswords: Set<string>,
+  placement: AnswerKey["metadataPlacement"],
+  lenient: Lenient = {},
+  sensitive: string[] = [],
+): Check[] {
   const checks: Check[] = [{ field: "user", ok: Boolean(u), reason: "not imported" }];
 
   // ── identifiers: each expected one present, verified as expected, nothing extra ──
@@ -57,8 +73,14 @@ function checksFor(e: Expected, u: User | undefined, badPasswords: Set<string>, 
     primaryId: string | null | undefined,
   ) => {
     const find = (v: string) => held.find((h) => h.value.toLowerCase() === v.toLowerCase());
+    const safeDefault = Boolean(lenient[kind]);
+    const UNTOLD = "imported unverified; nobody told the agent how verification is marked";
     for (const v of verified) {
       const h = find(v);
+      if (h && !h.verified && safeDefault) {
+        checks.push({ field: kind, ok: true }, { field: kind, ok: false, reason: UNTOLD, example: `${v}`, note: true });
+        continue;
+      }
       checks.push({ field: kind, ok: Boolean(h?.verified), reason: h ? "not verified" : "missing", example: `expected ${v}` });
     }
     for (const v of unverified) {
@@ -67,7 +89,10 @@ function checksFor(e: Expected, u: User | undefined, badPasswords: Set<string>, 
     }
     if (primary) {
       const got = held.find((h) => h.id === primaryId)?.value;
-      checks.push({ field: `primary ${kind}`, ok: got?.toLowerCase() === primary.toLowerCase(), reason: "wrong value", example: `expected ${primary}, got ${show(got)}` });
+      const ok = got?.toLowerCase() === primary.toLowerCase();
+      // An unverified address can't be primary: that follows from the safe default above.
+      if (!ok && safeDefault && find(primary) && !find(primary)!.verified) checks.push({ field: `primary ${kind}`, ok: true });
+      else checks.push({ field: `primary ${kind}`, ok, reason: "wrong value", example: `expected ${primary}, got ${show(got)}` });
     }
     const want = new Set([...verified, ...unverified].map((v) => v.toLowerCase()));
     for (const h of held) {
@@ -123,6 +148,9 @@ function checksFor(e: Expected, u: User | undefined, badPasswords: Set<string>, 
         : `${k} expected ${show(v)}, got ${there ? show(held(there)[k]) : "none"}`;
       if (placement === "strict") {
         checks.push({ field: "metadata", ok: where.includes(want), reason, example });
+      } else if (sensitive.includes(k) && where.some((f) => f !== "privateMetadata")) {
+        // Placement is advisory, but a billing or CRM ID or an internal note must never reach the browser.
+        checks.push({ field: "metadata", ok: false, reason: "sensitive key readable in the browser", example });
       } else {
         checks.push({ field: "metadata", ok: where.length > 0, reason, example });
         if (where.length && !where.includes(want)) checks.push({ field: "metadata", ok: false, reason, example, note: true });
@@ -150,7 +178,7 @@ export function grade(
   users: User[],
   rejected: Map<string, string>,
   badPasswords: Set<string>,
-  opts: { matchBy?: "id" | "identifiers" } = {},
+  opts: { matchBy?: "id" | "identifiers"; lenient?: Lenient } = {},
 ): Grade {
   const byIdentifiers = opts.matchBy === "identifiers";
   const problems = new Map<string, Problem>();
@@ -198,7 +226,8 @@ export function grade(
       continue;
     }
 
-    const checks = checksFor(e, u, badPasswords, key.metadataPlacement);
+    const lenient = opts.lenient ?? {};
+    const checks = checksFor(e, u, badPasswords, lenient.placement ? "advisory" : key.metadataPlacement, lenient, key.sensitive);
     if (idProblem) checks.push({ field: "userId", ok: false, reason: "wrong value", example: idProblem });
     const graded = checks.filter((c) => !c.note);
     total += graded.length;
@@ -209,7 +238,8 @@ export function grade(
       // One problem for the user, not one per field it would have had.
       notImported++;
       const reason = rejected.get(e.externalId) ?? [...idsOf(e)].map((i) => rejected.get(i)).find(Boolean) ?? rejected.get("*");
-      add(problems, "user", `not imported: ${reason ?? "no reason recorded"}`, e.externalId);
+      // No record at all: the CLI never saw the user, because the source left it out.
+      add(problems, "user", `not imported: ${reason ?? "never reached the CLI (the source left it out)"}`, e.externalId);
       continue;
     }
     imported++;

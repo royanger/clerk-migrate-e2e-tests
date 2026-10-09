@@ -6,6 +6,8 @@
  *   pnpm test:custom --all --sources-dir ./dir                every export
  *   ... --cli <path/to/cli.ts | clerk>                        a different CLI checkout, or a binary
  *   ... --out <dir>                                           write to <dir>/test-custom and <dir>/clerk-runs
+ *   ... --lenient email,phone,placement                       grade what the agent was never told as notes (lib/grade.ts Lenient)
+ *   ... --expect <file>                                       { externalId: { field: value | null } } over the answer key: what an answer set changes
  *
  * --all looks in the directory for <name>-<format>.ts, then <name>.ts, per
  * export (`keyhole-csv.ts`, else `keyhole.ts`). An export with neither is
@@ -24,12 +26,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { clerkRun, cliVersion, DEFAULT_CLI, SetupError } from "./lib/clerk-run";
 import { configForUsers, DEST_KEYS, withBaseline } from "./lib/clerk-dest";
-import { grade, section, summaryLine, type Grade } from "./lib/grade";
+import { grade, section, summaryLine, type Grade, type Lenient } from "./lib/grade";
 import { flag, value } from "./lib/args";
 import { claimTarget, targetArgs } from "./lib/targets";
 import type { AnswerKey } from "./generate-custom-exports";
 
-const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
+const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun", "frostline", "nimbus"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
 /** A cli.ts path, or a binary on PATH such as `clerk`. */
 const cliFlag = value("cli")?.replace(/^~(?=\/|$)/, homedir());
 const CLI = cliFlag ? (cliFlag.includes("/") ? resolve(cliFlag) : cliFlag) : DEFAULT_CLI;
@@ -69,6 +71,15 @@ const out = value("out");
 const runDir = out ? resolve(out, "test-custom") : resolve("test-results", runName);
 const clerkRunsDir = out ? resolve(out, "clerk-runs") : resolve("clerk-runs", runName);
 const CLI_VERSION = cliVersion(CLI);
+const LENIENT_KEYS = ["email", "phone", "placement"] as const;
+const EXPECT: Record<string, Record<string, unknown>> = value("expect") ? JSON.parse(readFileSync(value("expect")!, "utf8")) : {};
+const lenientArg = value("lenient")?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+const badLenient = lenientArg.filter((k) => !(LENIENT_KEYS as readonly string[]).includes(k));
+if (badLenient.length) {
+  console.error(`--lenient takes ${LENIENT_KEYS.join(", ")}; got ${badLenient.join(", ")}`);
+  process.exit(2);
+}
+const LENIENT: Lenient = Object.fromEntries(lenientArg.map((k) => [k, true]));
 mkdirSync(runDir, { recursive: true });
 mkdirSync(clerkRunsDir, { recursive: true });
 // The pool target the parent eval claimed for this run (CLERK_TARGET_NAME), else a free one.
@@ -114,6 +125,12 @@ type Result = { name: string; source?: string; grade?: Grade; error?: string; im
 async function runOne(name: string, source: string): Promise<Result> {
   const base = name.split(".")[0];
   const key = JSON.parse(readFileSync(`data/custom-sources-answers/${base}.expected.json`, "utf8")) as AnswerKey;
+  // An answer set can change what's right (a customer who says "ban them, don't skip them"): its overrides win.
+  for (const [id, patch] of Object.entries(EXPECT)) {
+    const u = key.users.find((x) => x.externalId === id) as Record<string, unknown> | undefined;
+    if (!u) throw new Error(`--expect names ${id}, which ${base}'s answer key doesn't have`);
+    for (const [k, v] of Object.entries(patch)) if (v === null) delete u[k]; else u[k] = v;
+  }
   const file = resolve("data/custom-sources", name);
   const dir = join(runDir, name);
   mkdirSync(dir, { recursive: true });
@@ -149,7 +166,7 @@ async function runOne(name: string, source: string): Promise<Result> {
       users = await clerkUsers();
     }
     const pw = await verifyPasswords(users, key.seedPassword);
-    result.grade = grade(key, users, rejections(importRun, dry.json, key), new Set(pw.failed));
+    result.grade = grade(key, users, rejections(importRun, dry.json, key), new Set(pw.failed), { lenient: LENIENT });
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
     // A broken setup grades nothing: report it as not run, not as the source's F.
@@ -171,11 +188,21 @@ async function runOne(name: string, source: string): Promise<Result> {
 
 // ── main ──
 
-const snapshot = JSON.parse((await cli(["config", "pull", ...target])).stdout);
-writeFileSync(join(runDir, "clerk-config-before.json"), JSON.stringify(snapshot, null, 2));
+const pull = await cli(["config", "pull", ...target]);
+// An expired `clerk auth login` fails here (seen mid-batch): a broken setup, not the source's F.
+const pullError = pull.code === 0 && pull.stdout.trim()
+  ? undefined
+  : `not run: clerk config pull exited ${pull.code}: ${pull.stderr.trim().split("\n").pop() || "no output"}`;
+const snapshot = pullError ? undefined : JSON.parse(pull.stdout);
+if (snapshot) writeFileSync(join(runDir, "clerk-config-before.json"), JSON.stringify(snapshot, null, 2));
 const results: Result[] = [];
 try {
   for (const job of jobs) {
+    if (pullError) {
+      console.log(`${job.name.padEnd(14)} —   ${pullError}`);
+      results.push({ ...job, error: pullError });
+      continue;
+    }
     if (!job.source) {
       console.log(`${job.name.padEnd(14)} —   not run: no source in ${value("sourcesDir")}`);
       results.push({ ...job, error: "no source file" });
@@ -186,7 +213,7 @@ try {
     console.log(r.grade ? summaryLine(r.name, r.grade) + (r.error ? `   ✗ ${r.error}` : "") : `${r.name.padEnd(14)} —   ${r.error}`);
   }
 } finally {
-  await patchConfig(Object.fromEntries(DEST_KEYS.map((k) => [k, snapshot[k]]))).catch((e) =>
+  if (snapshot) await patchConfig(Object.fromEntries(DEST_KEYS.map((k) => [k, snapshot[k]]))).catch((e) =>
     console.error(`!! config restore failed: ${e.message}`),
   );
 }
@@ -202,7 +229,7 @@ const table = [
   ),
 ].join("\n");
 const sections = results.filter((r) => r.grade).map((r) => section(r.name, r.source!, r.grade!, r.error));
-writeFileSync(join(runDir, "report.md"), `# Custom source test: ${stamp}\n\nCLI: \`${CLI}\` @ ${CLI_VERSION}\n\n${table}\n\n${sections.join("\n")}`);
+writeFileSync(join(runDir, "report.md"), `# Custom source test: ${stamp}\n\nCLI: \`${CLI}\` @ ${CLI_VERSION}${lenientArg.length ? ` · lenient: ${lenientArg.join(", ")}` : ""}\n\n${table}\n\n${sections.join("\n")}`);
 writeFileSync(join(runDir, "report.json"), JSON.stringify({ cli: CLI, cliVersion: CLI_VERSION, results }, null, 2));
 console.log(`\nReport: ${join(runDir, "report.md")}`);
 process.exitCode = results.every((r) => r.grade?.grade === "A+") ? 0 : 1;

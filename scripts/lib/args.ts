@@ -31,6 +31,8 @@ export const FLAGS = {
   agents: ["--agents", "--agent", "-a"],
   exports: ["--exports"],
   promptDir: ["--prompt-dir"],
+  lenient: ["--lenient"],
+  expect: ["--expect"],
   usersFile: ["--users-file"],
   seedOnly: ["--seed-only"],
   restoreSource: ["--restore-source"],

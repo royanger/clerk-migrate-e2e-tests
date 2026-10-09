@@ -24,7 +24,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "../lib/run";
-import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
+import { clerkRun, cliVersion, pinCli, SetupError } from "../lib/clerk-run";
 import { claimTarget, targetArgs, targetEnv } from "../lib/targets";
 import { configForUsers, withBaseline } from "../lib/clerk-dest";
 import { value } from "../lib/args";
@@ -36,7 +36,7 @@ import { loadPrompts } from "./prompts";
 import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type QA } from "./session";
 import { AGENTS, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 
-const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
+const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun", "frostline", "nimbus"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
 /** Question rounds before the run is called stuck. */
 
 // ── arguments ──
@@ -65,6 +65,8 @@ const set = answers.set;
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
 const batchDir = resolve("evals/runs", `${stamp}-${set.name}`);
 mkdirSync(batchDir, { recursive: true });
+// Every run in the batch is graded on this one build, whatever happens to the checkout meanwhile.
+cfg.cli = pinCli(cfg.cli, join(batchDir, "cli"));
 const repoRoot = process.cwd();
 
 // Only `dry-run` lets the agent touch Clerk, and its dry run should see an
@@ -106,7 +108,17 @@ type Result = {
   notRun?: string;
   /** The Clerk target (evals/targets.json) the run claimed. */
   target?: string;
+  /** What test:custom graded as notes, because the agent was never told (lib/grade.ts Lenient). */
+  lenient?: string[];
 };
+
+/**
+ * The grade column: "—" when setup failed, "blocked" when the agent stopped
+ * itself and left nothing to grade (refusing a wrong answer is not a fail),
+ * else the grade.
+ */
+const gradeCell = (r: Result) =>
+  r.notRun ? "—" : r.status === "blocked" && !r.grade ? "blocked" : (r.grade?.grade ?? "F");
 
 /** The source the agent wrote: the file it named, else the newest .ts/.js it created. */
 function findSource(wsDir: string, named: string | null | undefined): string | undefined {
@@ -170,9 +182,22 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
   result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS) : [];
 
   // ── grade with test:custom ──
+  // What the agent was never told (no answer, a fallback, or an "unknown" one) is graded as a note.
+  const told = (topic: string) =>
+    result.qa.some((q) => q.topics.includes(topic) && q.by !== "fallback" && !q.tags.includes(`${topic}: unknown`));
+  result.lenient = [
+    ...(told("email-verification") ? [] : ["email"]),
+    ...(told("phone-verification") ? [] : ["phone"]),
+    ...(told("metadata") ? [] : ["placement"]),
+  ];
   if (result.sourceFile && claim) {
     // The child grades on this run's target: it inherits the lock (PROVIDER_LOCKS) and is told which one.
-    const t = await run("tsx", ["scripts/test-custom-source.ts", "-e", exportName, "-s", join(dir, result.sourceFile), "--cli", cfg.cli, "--out", dir], {
+    const lenientArgs = result.lenient.length ? ["--lenient", result.lenient.join(",")] : [];
+    // What this set's answers change about the right result (set.json "expect", per provider).
+    const expect = (set.meta.expect as Record<string, unknown> | undefined)?.[provider];
+    if (expect) writeFileSync(join(dir, "expect.json"), JSON.stringify(expect, null, 2));
+    const expectArgs = expect ? ["--expect", join(dir, "expect.json")] : [];
+    const t = await run("tsx", ["scripts/test-custom-source.ts", "-e", exportName, "-s", join(dir, result.sourceFile), "--cli", cfg.cli, "--out", dir, ...lenientArgs, ...expectArgs], {
       ...process.env, ...targetEnv(claim.target),
     }).finally(() => claim?.release());
     writeFileSync(join(dir, "test-custom.log"), t.stdout + t.stderr);
@@ -189,7 +214,7 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
     }
   } else {
     claim?.release();
-    result.gradeError = result.notRun ?? "the agent wrote no source file";
+    result.gradeError = result.notRun ?? (result.status === "blocked" ? "blocked: the agent stopped without a source" : "the agent wrote no source file");
   }
 
   writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2));
@@ -204,12 +229,13 @@ const pct = (g?: Grade) => (g ? `${(Math.floor(g.accuracy * 1000) / 10).toFixed(
 function resultMarkdown(r: Result): string {
   const c = counts(r.qa);
   const lines = [
-    `# ${r.agent} · ${r.export}: ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} (${pct(r.grade)})`,
+    `# ${r.agent} · ${r.export}: ${gradeCell(r)} (${pct(r.grade)})`,
     "",
     `| | |`,
     `|---|---|`,
     `| Agent | ${r.agent} (${r.model}, effort ${r.effort}) |`,
     `| Clerk target | ${r.target ?? "none claimed"} |`,
+    `| Lenient grading | ${r.lenient?.length ? `${r.lenient.join(", ")} (the agent was never told)` : "none"} |`,
     `| Answer set | ${set.name} v${r.setVersion} |`,
     `| Skill | ${skillHash} |`,
     `| Prompts | ${prompts.dir} (${prompts.hash}) |`,
@@ -245,7 +271,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
       versions.size > 1 && `set v${r.setVersion}`,
       clis.size > 1 && `CLI ${r.cliVersion ?? "?"}`,
     ].filter(Boolean).join("; ");
-    return `| ${r.agent} | ${r.export} | ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
+    return `| ${r.agent} | ${r.export} | ${gradeCell(r)} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
       `${c.set}/${c.fallback}/${c.you} | ${minutes(r.seconds)} | [result](${r.agent}/${r.export}/result.md) | ${notes} |`;
   });
   return [
@@ -295,7 +321,7 @@ for (const agent of agents) {
     results.push(r);
     const c = counts(r.qa);
     console.log(
-      `${((r.notRun ? "—" : (r.grade?.grade ?? "F"))).padEnd(3)} ${pct(r.grade).padStart(6)}   ${r.status}, ${r.qa.length} questions ` +
+      `${(gradeCell(r)).padEnd(3)} ${pct(r.grade).padStart(6)}   ${r.status}, ${r.qa.length} questions ` +
         `(${c.set} set, ${c.fallback} fallback, ${c.you} you), ${minutes(r.seconds)} min` +
         (r.contaminated.length ? "   CONTAMINATED" : "") + (r.gradeError && !r.grade ? `   ✗ ${r.gradeError}` : ""),
     );

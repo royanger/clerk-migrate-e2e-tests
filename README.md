@@ -29,7 +29,7 @@ failing on it.
 
 ```sh
 pnpm eval:ready                         # agents signed in and isolated; all 8 Clerk instances reachable
-pnpm eval:sources --set clear-correct   # write a custom source: 8 exports × 2 agents
+pnpm eval:sources --set clear-correct   # write a custom source: 12 exports × 2 agents
 pnpm eval:imports -a claude             # import a provider's export: 2 sets × 7 providers
 pnpm eval:migrations -a claude          # export from a live provider, then import: 2 sets × 7 providers
 ```
@@ -482,7 +482,15 @@ over checks made, and a user that never landed fails all of its checks.
 | A+ | 100% |
 | A / B / C / D | ≥ 95% / 85% / 70% / 50% |
 | F | below 50%, or the run failed |
+| blocked | the agent stopped itself and left nothing to grade (refusing a wrong answer, say) |
 | — | not run: setup failed (a Clerk timeout, no free target), so nothing was graded |
+
+**What the agent was never told counts as a note.** When no answer told the
+agent how verification is marked, importing an email or phone as unverified
+(the skill's safe default) is a note, not a failure. When no answer said where
+metadata goes, any metadata field passes. `eval:sources` works this out from the
+questions and answers and passes `--lenient email,phone,placement` to
+`test:custom`; each `result.md` lists what was graded leniently.
 
 **The report** (`test-results/<stamp>-custom*/report.md`, or `--out`) groups
 failures by field and reason: five users with a broken phone make one problem
@@ -535,7 +543,7 @@ outside its workspace, and this shows if it did.
 ### Source evals
 
 ```sh
-pnpm eval:sources --set clear-correct                    both agents, all 8 exports
+pnpm eval:sources --set clear-correct                    both agents, all 12 exports
 pnpm eval:sources --set clueless -a claude               one agent
 pnpm eval:sources --set mixed --agent-cli dry-run -a codex --exports gatekeep.csv
 ```
@@ -615,7 +623,7 @@ matches users by email, phone or username. `Stumbles` counts failed or refused
 Each eval has its own sets, so you tune the answers to what that eval asks:
 
 ```
-evals/answer-sets/sources/      clear-correct, mixed, clueless
+evals/answer-sets/sources/      clear-correct, mixed, clueless, wrong
 evals/answer-sets/imports/      permissive (D1), strict (D2)
 evals/answer-sets/migrations/   permissive, strict: plus credentials, and "there's no export file yet"
 ```

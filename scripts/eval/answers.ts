@@ -18,6 +18,12 @@ export const setsDir = (kind: EvalKind) => join("evals/answer-sets", kind);
 
 export type Answer = { topic: string; tag?: string; text: string };
 
+/**
+ * `## late`: not an answer to anything. The runner sends it once, unasked, the
+ * first time the agent says it's done: the customer changing their mind.
+ */
+export const LATE = "late";
+
 export type AnswerSet = {
   name: string;
   /** The folder of sets this one lives in. */
@@ -69,7 +75,7 @@ export function loadSet(name: string, folder: string): AnswerSet {
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
     const parsed = parseAnswers(readFileSync(join(dir, file), "utf8"));
     for (const topic of parsed.keys()) {
-      if (!topics[topic]) throw new Error(`${dir}/${file}: topic "${topic}" is not in topics.json`);
+      if (!topics[topic] && topic !== LATE) throw new Error(`${dir}/${file}: topic "${topic}" is not in topics.json`);
     }
     answers.set(file.replace(/\.md$/, ""), parsed);
   }
