@@ -2,6 +2,10 @@
   "source": "gatekeep",
   "seedPassword": "Kk4aPMeiaRpAs2OeX1NE",
   "metadataPlacement": "advisory",
+  "sensitive": [
+    "stripe_customer",
+    "internal_notes"
+  ],
   "users": [
     {
       "externalId": "acct_4d2n99vmhg",

@@ -8,6 +8,13 @@
  *   gatekeep  ~50–60%  nested identities[], national-format phones + region, one mixed metadata blob
  *   vaultrun  ~70%     one `login` column of mixed kinds, bitmask flags, packed strings
  *
+ * Two more are a holdout: never tune the skill's wording or examples on them,
+ * so their grades show whether it generalises rather than whether it names
+ * the trap.
+ *
+ *   frostline ~45%     status strings, national phones + country_iso, passlib and $2y$ hashes, state words + frozen_until
+ *   nimbus    ~70%     packed contacts, 00/+ phones, {SSHA} and unsupported $6$ hashes, letter states, querystring props
+ *
  * Each provider gets a JSON and a CSV export of the same 50 users, plus an
  * answer key (what each user should become in Clerk) that the skill must never
  * see:
@@ -16,14 +23,15 @@
  *   data/custom-sources-answers/<name>.expected.json      what test:custom grades against
  *
  * Every password is a real hash of SEED_PASSWORD, so test:custom can check each
- * one signs in. The users are deterministic per provider; the hashes are not
+ * one signs in. The exception is nimbus's `$6$` (sha512-crypt), which Clerk
+ * can't import: those are random, and the answer key expects no password. The users are deterministic per provider; the hashes are not
  * (bcrypt and argon2 salt themselves), which no check depends on.
  *
  * Run: pnpm generate:custom
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { pbkdf2Sync } from "node:crypto";
+import { createHash, pbkdf2Sync } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { faker } from "@faker-js/faker";
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
@@ -38,7 +46,7 @@ const COUNT = 50;
 
 // ── the canonical user, before any provider shapes it ──
 
-type Hasher = "bcrypt" | "argon2id" | "pbkdf2";
+type Hasher = "bcrypt" | "argon2id" | "pbkdf2" | "passlib" | "ssha" | "sha512crypt";
 type Canon = {
   n: number;
   /** Primary first. */
@@ -87,6 +95,8 @@ export type AnswerKey = {
    *   field counts; a different one than the reference source's is a note.
    */
   metadataPlacement: "strict" | "advisory";
+  /** Private keys graded even when placement is advisory or lenient: billing and CRM IDs, internal notes. */
+  sensitive?: string[];
   users: Expected[];
 };
 
@@ -216,6 +226,20 @@ function argon2Pool(count: number): string[] {
 const ARGON2 = argon2Pool(COUNT * 2);
 const argon2 = () => ARGON2.pop()!;
 const bcryptHash = () => bcrypt.hashSync(SEED_PASSWORD, 10);
+/** passlib's pbkdf2_sha256: `$pbkdf2-sha256$<rounds>$<salt>$<key>` in passlib's base64 (`.` for `+`, no padding), salt = 16 raw bytes. */
+const passlib = () => {
+  const ab64 = (b: Buffer) => b.toString("base64").replace(/=+$/, "").replace(/\+/g, ".");
+  const s = Buffer.from(faker.string.hexadecimal({ length: 32, prefix: "" }), "hex");
+  const rounds = 29_000;
+  return `$pbkdf2-sha256$${rounds}$${ab64(s)}$${ab64(pbkdf2Sync(SEED_PASSWORD, s, rounds, 32, "sha256"))}`;
+};
+/** OpenLDAP's {SSHA}: base64(sha1(password + salt) + salt), 8-byte salt. */
+const ssha = () => {
+  const s = Buffer.from(faker.string.hexadecimal({ length: 16, prefix: "" }), "hex");
+  return `{SSHA}${Buffer.concat([createHash("sha1").update(SEED_PASSWORD).update(s).digest(), s]).toString("base64")}`;
+};
+/** A sha512-crypt-shaped value: Clerk has no hasher for it, so the source must drop it. Not a real hash. */
+const sha512crypt = () => `$6$${faker.string.alphanumeric(16)}$${faker.string.alphanumeric(86)}`;
 const django = () => {
   const s = salt();
   return `pbkdf2_sha256$${PBKDF2_ROUNDS}$${s}$${pbkdf2(s)}`;
@@ -249,17 +273,17 @@ function expected(u: Canon, externalId: string): Expected {
     firstName: u.firstName,
     lastName: u.lastName,
     banned: u.banned,
-    hasPassword: Boolean(u.hasher),
+    hasPassword: Boolean(u.hasher) && u.hasher !== "sha512crypt",
     publicMetadata: u.meta.public,
     privateMetadata: u.meta.private,
     unsafeMetadata: u.meta.unsafe,
   };
 }
 
-function write(name: string, placement: AnswerKey["metadataPlacement"], json: unknown, rows: Record<string, unknown>[], answers: Expected[]) {
+function write(name: string, placement: AnswerKey["metadataPlacement"], json: unknown, rows: Record<string, unknown>[], answers: Expected[], sensitive: string[]) {
   writeFileSync(`${OUT}/${name}.json`, JSON.stringify(json, null, 2) + "\n");
   writeFileSync(`${OUT}/${name}.csv`, csv(rows));
-  const key: AnswerKey = { source: name, seedPassword: SEED_PASSWORD, metadataPlacement: placement, users: answers };
+  const key: AnswerKey = { source: name, seedPassword: SEED_PASSWORD, metadataPlacement: placement, sensitive, users: answers };
   writeFileSync(`${ANSWERS}/${name}.expected.json`, JSON.stringify(key, null, 2) + "\n");
   const live = answers.filter((a) => !a.skip).length;
   console.log(`${name.padEnd(9)} ${answers.length} users (${live} should import) → ${OUT}/${name}.{json,csv}`);
@@ -297,7 +321,7 @@ function keyhole() {
     created_at: u.createdAt.toISOString(),
     banned: u.banned,
   }));
-  write("keyhole", "strict", records, records, users.map((u, i) => expected(u, records[i].id)));
+  write("keyhole", "strict", records, records, users.map((u, i) => expected(u, records[i].id)), ["stripe_customer_id"]);
 }
 
 // ── 2. Passly: ~30% ──
@@ -337,7 +361,7 @@ function passly() {
     "credentials.algo": credentials?.algo,
     "credentials.hash": credentials?.hash,
   }));
-  write("passly", "strict", json, rows, users.map((u, i) => expected(u, records[i].uid)));
+  write("passly", "strict", json, rows, users.map((u, i) => expected(u, records[i].uid)), ["crm_id"]);
 }
 
 // ── 3. Gatekeep: ~50–60% ──
@@ -403,7 +427,7 @@ function gatekeep() {
     });
     return row;
   });
-  write("gatekeep", "advisory", json, rows, users.map((u, i) => expected(u, records[i].account_ref)));
+  write("gatekeep", "advisory", json, rows, users.map((u, i) => expected(u, records[i].account_ref)), ["stripe_customer", "internal_notes"]);
 }
 
 // ── 4. Vaultrun: ~70% ──
@@ -449,7 +473,82 @@ function vaultrun() {
       del: u.deleted ? 1 : 0,
     };
   });
-  write("vaultrun", "advisory", records, records, users.map((u, i) => expected(u, records[i].rid)));
+  write("vaultrun", "advisory", records, records, users.map((u, i) => expected(u, records[i].rid)), ["crm"]);
+}
+
+// ── 5. Frostline: ~45% (holdout) ──
+
+function frostline() {
+  const users = canon({
+    seed: 5005,
+    hasher: (i) => (i % 4 === 3 ? "bcrypt" : "passlib"),
+    deleted: 3,
+    meta: {
+      public: () => some({ plan: pick(["basic", "plus", "max"]) }),
+      private: () => some({ stripe_id: `cus_${faker.string.alphanumeric(14)}`, seats: faker.number.int({ min: 1, max: 40 }) }),
+      unsafe: () => some({ theme: pick(["light", "dark"]), language: pick(["en", "fr", "de"]) }),
+    },
+  });
+  const offset = (d: Date) => new Date(d.getTime() + 2 * 3600_000).toISOString().replace("Z", "+02:00");
+  const records = users.map((u, i) => ({
+    member_no: `FL-${String(100_200 + i * 13).padStart(6, "0")}`,
+    contact: {
+      email: u.emails[0]?.value ?? null,
+      email_status: u.emails[0] ? (u.emails[0].verified ? "confirmed" : "pending") : null,
+      mobile: u.phone ? national(u.phone.e164) : null,
+      country_iso: u.phone?.country ?? null,
+      mobile_status: u.phone ? (u.phone.verified ? "confirmed" : "pending") : null,
+    },
+    login_name: u.username ?? null,
+    given_name: u.firstName ?? null,
+    surname: u.lastName ?? null,
+    // PHP's bcrypt prefix: the same algorithm as $2b$.
+    pw: u.hasher === "passlib" ? passlib() : u.hasher ? bcryptHash().replace(/^\$2b\$/, "$2y$") : null,
+    state: u.deleted ? "closed" : u.banned ? "frozen" : "active",
+    // A frozen account thaws on this date: the data says it's a hold, not gone.
+    frozen_until: u.banned ? new Date(Date.UTC(2026, 10, 1 + (i % 28))).toISOString().slice(0, 10) : null,
+    billing: orNull({ ...u.meta.public, ...u.meta.private }),
+    settings: orNull(u.meta.unsafe),
+    joined: offset(u.createdAt),
+  }));
+  const json = { result: { members: records }, next_cursor: null };
+  const rows = records.map(({ contact, ...r }) => ({ ...r, ...Object.fromEntries(Object.entries(contact).map(([k, v]) => [`contact_${k}`, v])) }));
+  write("frostline", "advisory", json, rows, users.map((u, i) => expected(u, records[i].member_no)), ["stripe_id"]);
+}
+
+// ── 6. Nimbus: ~70% (holdout) ──
+
+function nimbus() {
+  const users = canon({
+    seed: 6006,
+    hasher: (i) => (i % 5 === 1 ? "ssha" : i % 5 === 3 ? "sha512crypt" : "bcrypt"),
+    deleted: 2,
+    // One `props` querystring in the export; split here only to say where the reference source puts each key.
+    meta: {
+      public: () => some({ plan: pick(["solo", "team", "corp"]), lang: pick(["en", "es"]) }),
+      private: () => some({ ref: pick(["partner", "ads", "organic"]), acct_note: faker.lorem.words(4) }),
+    },
+  });
+  const records = users.map((u, i) => {
+    // Half the numbers dialled from abroad (00 44…), half in E.164.
+    const tel = u.phone ? (i % 2 ? `00${u.phone.e164.slice(1)}` : u.phone.e164) : undefined;
+    const contacts = [
+      ...u.emails.map((e) => `email:${e.value}:${e.verified ? 1 : 0}`),
+      ...(u.phone && tel ? [`tel:${tel}:${u.phone.verified ? 1 : 0}`] : []),
+    ].join("|");
+    const props = new URLSearchParams(Object.entries({ ...u.meta.public, ...u.meta.private }).map(([k, v]) => [k, String(v)])).toString();
+    return {
+      uid: 70_000 + i * 11,
+      contacts,
+      nick: u.username ?? "",
+      name: [u.firstName, u.lastName].filter(Boolean).join(" "),
+      secret: u.hasher === "ssha" ? ssha() : u.hasher === "sha512crypt" ? sha512crypt() : u.hasher ? bcryptHash().replace(/^\$2b\$/, "$2a$") : "",
+      st: u.deleted ? "X" : u.banned ? "S" : "A",
+      props,
+      ctime: String(Math.floor(u.createdAt.getTime() / 1000)),
+    };
+  });
+  write("nimbus", "advisory", records, records, users.map((u, i) => expected(u, String(records[i].uid))), ["acct_note"]);
 }
 
 mkdirSync(OUT, { recursive: true });
@@ -458,3 +557,5 @@ keyhole();
 passly();
 gatekeep();
 vaultrun();
+frostline();
+nimbus();

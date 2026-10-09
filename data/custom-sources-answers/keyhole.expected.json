@@ -2,6 +2,9 @@
   "source": "keyhole",
   "seedPassword": "Kk4aPMeiaRpAs2OeX1NE",
   "metadataPlacement": "strict",
+  "sensitive": [
+    "stripe_customer_id"
+  ],
   "users": [
     {
       "externalId": "kh_a69d35a6e0ca03a44ebfdb4c",

@@ -2,6 +2,9 @@
   "source": "vaultrun",
   "seedPassword": "Kk4aPMeiaRpAs2OeX1NE",
   "metadataPlacement": "advisory",
+  "sensitive": [
+    "crm"
+  ],
   "users": [
     {
       "externalId": "100001",

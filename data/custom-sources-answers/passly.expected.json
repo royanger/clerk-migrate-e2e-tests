@@ -2,6 +2,9 @@
   "source": "passly",
   "seedPassword": "Kk4aPMeiaRpAs2OeX1NE",
   "metadataPlacement": "strict",
+  "sensitive": [
+    "crm_id"
+  ],
   "users": [
     {
       "externalId": "d443a4ca-30a4-457c-9baf-14edb608cac8",
