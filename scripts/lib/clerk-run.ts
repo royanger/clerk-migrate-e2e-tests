@@ -11,15 +11,35 @@ import { createClerkClient, type User } from "@clerk/backend";
 import { run } from "./run";
 import { pool, withRetry } from "./users";
 
-/** argv prefix that runs a CLI: a cli.ts path runs with bun, anything else is a binary (e.g. `clerk`). */
-export const cliArgv = (cli: string) => (cli.endsWith(".ts") ? ["bun", cli] : [cli]);
+/** argv prefix that runs a CLI: a cli.ts path (or pinCli's bundle) runs with bun, anything else is a binary (e.g. `clerk`). */
+export const cliArgv = (cli: string) => (/\.[jt]s$/.test(cli) ? ["bun", cli] : [cli]);
+
+/**
+ * Freezes a cli.ts checkout for one batch: bundles it into `dir/cli.js`, so a
+ * commit to the CLI mid-batch no longer changes what later runs are graded on.
+ * The keychain module is native and won't load from a bundle, so it stays
+ * external and resolves through NODE_PATH, which every child process inherits.
+ * Anything that isn't a cli.ts path is returned as it is.
+ */
+export function pinCli(cli: string, dir: string): string {
+  if (!cli.endsWith(".ts")) return cli;
+  execFileSync("bun", ["build", cli, "--target=bun", "--external", "@napi-rs/keyring", "--outdir", dir], { stdio: "ignore" });
+  process.env.NODE_PATH = [join(dirname(cli), "..", "node_modules"), process.env.NODE_PATH].filter(Boolean).join(":");
+  return join(dir, "cli.js");
+}
 
 /**
  * Which build of the CLI ran: the checkout's commit (plus "dirty" when it has
- * uncommitted changes) for a cli.ts path, else the binary's --version.
+ * uncommitted changes) for a cli.ts path or pinCli's bundle, else the binary's --version.
  */
 export function cliVersion(cli: string): string {
   try {
+    if (cli.endsWith(".js")) {
+      // The bundle's version was stamped at build time: 3.4.0-dev.20261007.b32dcdf7[.dirty]
+      const v = execFileSync("bun", [cli, "--version"], { encoding: "utf8" }).trim();
+      const m = v.match(/\.([0-9a-f]{7,})(\.dirty)?$/);
+      return m ? `${m[1]}${m[2] ? " (dirty)" : ""}` : v;
+    }
     if (!cli.endsWith(".ts")) return execFileSync(cli, ["--version"], { encoding: "utf8" }).trim().split("\n")[0];
     const git = (...a: string[]) => execFileSync("git", ["-C", dirname(cli), ...a], { encoding: "utf8" }).trim();
     return `${git("rev-parse", "--short", "HEAD")}${git("status", "--porcelain") ? " (dirty)" : ""}`;

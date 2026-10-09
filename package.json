@@ -10,8 +10,8 @@
     "eval:users": "tsx scripts/eval/generate-eval-users.ts",
     "eval:provider-exports": "op run --env-file=op.env -- tsx scripts/eval/provider-exports.ts",
     "eval:imports:golden": "op run --env-file=op.env -- tsx scripts/eval/golden.ts",
-    "eval:imports": "op run --env-file=op.env -- tsx scripts/eval/imports.ts",
-    "eval:migrations": "op run --env-file=op.env -- tsx scripts/eval/migrations.ts",
+    "eval:imports": "caffeinate -i op run --env-file=op.env -- tsx scripts/eval/imports.ts",
+    "eval:migrations": "caffeinate -i op run --env-file=op.env -- tsx scripts/eval/migrations.ts",
     "seed": "op run --env-file=op.env -- tsx scripts/seed.ts",
     "reset": "op run --env-file=op.env -- tsx scripts/reset.ts",
     "teardown": "tsx scripts/teardown.ts",
@@ -34,7 +34,7 @@
     "test:custom": "op run --env-file=op.env -- tsx scripts/test-custom-source.ts",
     "eval:sync-skill": "tsx scripts/eval/sync-skill.ts",
     "eval:ready": "op run --env-file=op.env -- tsx scripts/eval/ready.ts",
-    "eval:sources": "op run --env-file=op.env -- tsx scripts/eval/run.ts"
+    "eval:sources": "caffeinate -i op run --env-file=op.env -- tsx scripts/eval/run.ts"
   },
   "devDependencies": {
     "@clerk/backend": "^3.17.0",

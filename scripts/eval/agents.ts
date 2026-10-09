@@ -52,6 +52,8 @@ export type Workspace = {
   bin: string;
   /** Codex's HOME. */
   home: string;
+  /** The agent's TMPDIR, so no scratch file outlives the run or reaches another one. */
+  tmp: string;
   root: string;
   /** The shim's log of every `clerk` call (JSONL). */
   calls: string;
@@ -75,11 +77,12 @@ export function createWorkspace(
   secretKey?: string,
 ): Workspace {
   const ws: Workspace = {
-    root, dir: join(root, "ws"), bin: join(root, "bin"), home: join(root, "home"),
+    root, dir: join(root, "ws"), bin: join(root, "bin"), home: join(root, "home"), tmp: join(root, "tmp"),
     calls: join(root, "clerk-calls.jsonl"), roundFile: join(root, "round"),
   };
   mkdirSync(ws.dir, { recursive: true });
   mkdirSync(ws.bin, { recursive: true });
+  mkdirSync(ws.tmp, { recursive: true });
   for (const f of files) copyFileSync(f, join(ws.dir, basename(f)));
   const skills = agent === "claude" ? ".claude/skills" : ".agents/skills";
   cpSync(SKILL_DIR, join(ws.dir, skills, basename(SKILL_DIR)), { recursive: true });
@@ -180,7 +183,7 @@ export async function runTurn(
   // pnpm puts this repo's node_modules/.bin on PATH; that would hand the agent
   // the repo's location (and its tools), so only directories outside it pass.
   const path = (process.env.PATH ?? "").split(":").filter((d) => !d.startsWith(process.cwd())).join(":");
-  const env = { ...process.env, PATH: `${ws.bin}:${path}` };
+  const env = { ...process.env, PATH: `${ws.bin}:${path}`, TMPDIR: ws.tmp };
   const started = Date.now();
   const timeoutMs = opts.timeoutMs ?? 15 * 60_000;
 
@@ -193,10 +196,10 @@ export async function runTurn(
       "--setting-sources", "project",
       "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
       "--permission-mode", "acceptEdits",
-      // node/python3/jq for analysing the export: Codex can run anything in its
+      // node/bun/python3/jq for analysing the export and running the source: Codex can run anything in its
       // sandbox, so without these Claude would be the only one reading JSON by eye.
       "--allowedTools", [
-        "Skill", "Read", "Write", "Edit", "Glob", "Grep", "Bash(node:*)", "Bash(python3:*)", "Bash(jq:*)",
+        "Skill", "Read", "Write", "Edit", "Glob", "Grep", "Bash(node:*)", "Bash(bun:*)", "Bash(python3:*)", "Bash(jq:*)",
         ...(opts.access === "none" ? [] : ["Bash(clerk:*)"]),
       ].join(","),
       // Questions go through the turn output, so the runner can answer them.
@@ -240,6 +243,8 @@ export async function runTurn(
     // A login shell runs macOS path_helper, which puts /opt/homebrew/bin (and
     // any real `clerk` there) ahead of the shim.
     "-c", "allow_login_shell=false",
+    // The shared /tmp carried one run's scratch scripts into later runs; TMPDIR (ws.tmp) stays writable.
+    "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
     // The dry run and import call Clerk; the workspace-write sandbox blocks the network otherwise.
     "-c", `sandbox_workspace_write.network_access=${opts.access !== "none" && opts.access !== "sources"}`,
     ...(opts.system ? ["-c", `developer_instructions=${JSON.stringify(opts.system)}`] : []),

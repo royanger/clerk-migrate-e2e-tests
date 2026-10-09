@@ -24,7 +24,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { value } from "../lib/args";
-import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
+import { clerkRun, cliVersion, pinCli, SetupError } from "../lib/clerk-run";
 import { claimTarget, targetArgs } from "../lib/targets";
 import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import { deleteAllUsers } from "../lib/clerk-source";
@@ -71,6 +71,8 @@ if (missingEnv.length) {
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
 const batchDir = resolve("evals/runs", `${stamp}-imports`);
 mkdirSync(batchDir, { recursive: true });
+// Every run in the batch is graded on this one build, whatever happens to the checkout meanwhile.
+cfg.cli = pinCli(cfg.cli, join(batchDir, "cli"));
 
 // ── one run ──
 
@@ -196,13 +198,16 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
 
 // ── reports ──
 
+/** "—" when setup failed, "blocked" when the agent stopped itself without doing anything, else the grade. */
+const gradeCell = (r: Result) => (r.notRun ? "—" : r.status === "blocked" && r.importRuns.length === 0 ? "blocked" : (r.grade?.grade ?? "F"));
+
 const pct = (g?: Grade) => (g ? `${(Math.floor(g.accuracy * 1000) / 10).toFixed(1)}%` : "—");
 const passed = (r: Result) => `${r.checks.filter((c) => c.ok).length}/${r.checks.length}`;
 
 function resultMarkdown(r: Result, set: AnswerSet, golden: GoldenKey): string {
   const c = counts(r.qa);
   const lines = [
-    `# ${r.agent} · ${r.provider} · ${r.set}: ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} (${pct(r.grade)}), process ${passed(r)}`,
+    `# ${r.agent} · ${r.provider} · ${r.set}: ${gradeCell(r)} (${pct(r.grade)}), process ${passed(r)}`,
     "",
     "| | |",
     "|---|---|",
@@ -241,7 +246,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
       r.goldenWarnings.length && "stale golden key",
       ...r.checks.filter((k) => !k.ok).map((k) => k.name),
     ].filter(Boolean).join("; ");
-    return `| ${r.set} | ${r.agent} | ${r.provider} | ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
+    return `| ${r.set} | ${r.agent} | ${r.provider} | ${gradeCell(r)} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
       `${passed(r)} | ${c.set}/${c.fallback}/${c.you} | ${minutes(r.seconds)} | [result](${r.set}/${r.agent}/${r.provider}/result.md) | ${notes} |`;
   });
   return [
@@ -291,7 +296,7 @@ const results: Result[] = [];
         results.push(r);
         const c = counts(r.qa);
         console.log(
-          `${((r.notRun ? "—" : (r.grade?.grade ?? "F"))).padEnd(3)} ${pct(r.grade).padStart(6)}   process ${passed(r)}   ${r.status}, ${r.qa.length} questions ` +
+          `${(gradeCell(r)).padEnd(3)} ${pct(r.grade).padStart(6)}   process ${passed(r)}   ${r.status}, ${r.qa.length} questions ` +
             `(${c.set} set, ${c.fallback} fallback, ${c.you} you), ${minutes(r.seconds)} min` +
             (r.contaminated.length ? "   CONTAMINATED" : "") + (r.error ? `   ✗ ${r.error}` : ""),
         );

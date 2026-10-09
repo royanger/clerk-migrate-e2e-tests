@@ -32,7 +32,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { value } from "../lib/args";
-import { clerkRun, cliVersion, SetupError } from "../lib/clerk-run";
+import { clerkRun, cliVersion, pinCli, SetupError } from "../lib/clerk-run";
 import { claimTarget, sourceTarget, targetArgs } from "../lib/targets";
 import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import { deleteAllUsers } from "../lib/clerk-source";
@@ -102,6 +102,8 @@ const FROM: Record<string, string> = { ...PROVIDER_NAMES, clerk: "another Clerk 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
 const batchDir = resolve("evals/runs", `${stamp}-migrations`);
 mkdirSync(batchDir, { recursive: true });
+// Every run in the batch is graded on this one build, whatever happens to the checkout meanwhile.
+cfg.cli = pinCli(cfg.cli, join(batchDir, "cli"));
 
 /** The values a set's answers give for `provider`: none may be written to a file. */
 function secretsFor(set: AnswerSet, provider: string): string[] {
@@ -274,6 +276,9 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
 
 // ── reports ──
 
+/** "—" when setup failed, "blocked" when the agent stopped itself without doing anything, else the grade. */
+const gradeCell = (r: Result) => (r.notRun ? "—" : r.status === "blocked" && r.exportRuns.length === 0 && r.importRuns.length === 0 ? "blocked" : (r.grade?.grade ?? "F"));
+
 const pct = (g?: Grade) => (g ? `${(Math.floor(g.accuracy * 1000) / 10).toFixed(1)}%` : "—");
 const score = (c: Check[]) => `${c.filter((k) => k.ok).length}/${c.length}`;
 const checkList = (c: Check[]) => c.map((k) => `- ${k.ok ? "✅" : "❌"} **${k.name}:** ${k.detail}`);
@@ -281,7 +286,7 @@ const checkList = (c: Check[]) => c.map((k) => `- ${k.ok ? "✅" : "❌"} **${k.
 function resultMarkdown(r: Result, set: AnswerSet, golden: GoldenKey): string {
   const c = counts(r.qa);
   const lines = [
-    `# ${r.agent} · ${r.provider} · ${r.set}: export ${score(r.exportChecks)}, import ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} (${pct(r.grade)}), process ${score(r.checks)}`,
+    `# ${r.agent} · ${r.provider} · ${r.set}: export ${score(r.exportChecks)}, import ${gradeCell(r)} (${pct(r.grade)}), process ${score(r.checks)}`,
     "",
     "| | |",
     "|---|---|",
@@ -366,7 +371,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
       r.goldenWarnings.length && "stale golden key",
       ...[...r.exportChecks, ...r.checks].filter((k) => !k.ok).map((k) => k.name),
     ].filter(Boolean).join("; ");
-    return `| ${r.set} | ${r.agent} | ${r.provider} | ${score(r.exportChecks)} | ${(r.notRun ? "—" : (r.grade?.grade ?? "F"))} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
+    return `| ${r.set} | ${r.agent} | ${r.provider} | ${score(r.exportChecks)} | ${gradeCell(r)} | ${pct(r.grade)} | ${r.grade ? `${r.grade.users.correct}/${r.grade.users.expected}` : "—"} | ` +
       `${score(r.checks)} | ${r.stumbles} | ${c.set}/${c.fallback}/${c.you} | ${minutes(r.seconds)} | [result](${r.set}/${r.agent}/${r.provider}/result.md) | ${notes} |`;
   });
   return [
@@ -429,7 +434,7 @@ try {
           results.push(r);
           const c = counts(r.qa);
           console.log(
-            `export ${score(r.exportChecks)}   ${((r.notRun ? "—" : (r.grade?.grade ?? "F"))).padEnd(3)} ${pct(r.grade).padStart(6)}   process ${score(r.checks)}   ` +
+            `export ${score(r.exportChecks)}   ${(gradeCell(r)).padEnd(3)} ${pct(r.grade).padStart(6)}   process ${score(r.checks)}   ` +
               `${r.status}, ${r.qa.length} questions (${c.set} set, ${c.fallback} fallback, ${c.you} you), ${minutes(r.seconds)} min` +
               (r.target ? `   on ${r.target}` : "") + (r.contaminated.length ? "   CONTAMINATED" : "") + (r.error ? `   ✗ ${redact(r.error)}` : ""),
           );
