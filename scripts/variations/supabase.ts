@@ -94,12 +94,9 @@ export const variations: Variation[] = [
             { ...u, oauth: ["github"] },
           ][i % 3],
         ),
-    // GitHub-only users are rejected (their only provider is off in Clerk);
-    // Google-only and password + GitHub users land.
-    expect: expectLanded({
-      ...supabase,
-      total: (seeded) => seeded.filter((u) => !(u.oauth?.[0] === "github" && !u.hasPassword)).length,
-    }),
+    // Everyone lands: GitHub is off in Clerk, but a GitHub-only user's email
+    // still signs in by code on D1, so the CLI warns instead of rejecting.
+    expect: expectLanded(supabase),
   },
   {
     id: "S7",
@@ -113,10 +110,14 @@ export const variations: Variation[] = [
             case 1: return { ...u, deleted: true };
             case 2: return { ...u, hasPassword: true, passwordFormat: "argon2id" as const };
             case 3:
-              return {
-                ...u,
-                metadata: i === 3 ? { ...HEAVY, user: { ...HEAVY.user, display_name: DISCORD_NAME } } : HEAVY,
-              };
+              // The Discord user has only a display name, as a Discord sign-up
+              // does: a metadata first_name would outrank it.
+              return i === 3
+                ? {
+                    ...u, firstName: null, lastName: null, fullName: null,
+                    metadata: { ...HEAVY, user: { ...HEAVY.user, display_name: DISCORD_NAME } },
+                  }
+                : { ...u, metadata: HEAVY };
             default: return u;
           }
         });
