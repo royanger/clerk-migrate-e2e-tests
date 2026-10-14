@@ -50,8 +50,13 @@ const show = (v: unknown) => (v === undefined || v === null || v === "" ? "none"
  *                  unverified is what the skill says to do, so it is a note
  *   placement      no informative answer about metadata: where each key landed
  *                  is a note, as long as it landed
+ *   status         no informative answer about account states: banned where the
+ *                  key skips, skipped (with a reason) or not banned where it bans,
+ *                  is a note; nobody said what the state means
  */
-export type Lenient = { email?: boolean; phone?: boolean; placement?: boolean };
+export type Lenient = { email?: boolean; phone?: boolean; placement?: boolean; status?: boolean };
+
+const UNTOLD_STATE = "nobody told the agent what this account state means";
 
 function checksFor(
   e: Expected,
@@ -124,7 +129,13 @@ function checksFor(
       example: `expected ${show(want)}, got ${show(got)}`,
     });
   }
-  checks.push({ field: "banned", ok: Boolean(u?.banned) === e.banned, reason: "wrong value", example: `expected ${e.banned}, got ${Boolean(u?.banned)}` });
+  const bannedOk = Boolean(u?.banned) === e.banned;
+  const bannedExample = `expected ${e.banned}, got ${Boolean(u?.banned)}`;
+  if (!bannedOk && u && lenient.status) {
+    checks.push({ field: "banned", ok: true }, { field: "banned", ok: false, reason: `wrong value; ${UNTOLD_STATE}`, example: bannedExample, note: true });
+  } else {
+    checks.push({ field: "banned", ok: bannedOk, reason: "wrong value", example: bannedExample });
+  }
 
   if (e.hasPassword) {
     const ok = Boolean(u?.passwordEnabled) && !badPasswords.has(u!.id);
@@ -216,17 +227,31 @@ export function grade(
     }
     if (u) claimed.add(u.id);
 
+    const lenient = opts.lenient ?? {};
+    const ownRejection = () => rejected.get(e.externalId) ?? [...idsOf(e)].map((i) => rejected.get(i)).find(Boolean);
+    const rejection = () => ownRejection() ?? rejected.get("*");
     if (e.skip) {
       total++;
-      if (u) add(problems, "user", "should have been skipped", e.externalId, e.skip);
+      // Banned keeps them out as surely as skipped, and nobody said the state meant deleted.
+      if (u && lenient.status && u.banned) add(notes, "user", `imported banned, not skipped; ${UNTOLD_STATE}`, e.externalId, e.skip);
+      if (u && !(lenient.status && u.banned)) add(problems, "user", "should have been skipped", e.externalId, e.skip);
       else {
         passed++;
         correct++;
       }
       continue;
     }
+    // The reverse: a banned user the source left out with a recorded reason.
+    // ponytail: any per-user reason counts, so a CLI rejection of a banned user also reads as a skip.
+    const skippedFor = !u && e.banned && lenient.status ? ownRejection() : undefined;
+    if (skippedFor) {
+      total++;
+      passed++;
+      correct++;
+      add(notes, "user", `skipped, not imported banned; ${UNTOLD_STATE}`, e.externalId, skippedFor);
+      continue;
+    }
 
-    const lenient = opts.lenient ?? {};
     const checks = checksFor(e, u, badPasswords, lenient.placement ? "advisory" : key.metadataPlacement, lenient, key.sensitive);
     if (idProblem) checks.push({ field: "userId", ok: false, reason: "wrong value", example: idProblem });
     const graded = checks.filter((c) => !c.note);
@@ -237,7 +262,7 @@ export function grade(
     if (!u) {
       // One problem for the user, not one per field it would have had.
       notImported++;
-      const reason = rejected.get(e.externalId) ?? [...idsOf(e)].map((i) => rejected.get(i)).find(Boolean) ?? rejected.get("*");
+      const reason = rejection();
       // No record at all: the CLI never saw the user, because the source left it out.
       add(problems, "user", `not imported: ${reason ?? "never reached the CLI (the source left it out)"}`, e.externalId);
       continue;

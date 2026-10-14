@@ -6,7 +6,7 @@
  *   pnpm test:custom --all --sources-dir ./dir                every export
  *   ... --cli <path/to/cli.ts | clerk>                        a different CLI checkout, or a binary
  *   ... --out <dir>                                           write to <dir>/test-custom and <dir>/clerk-runs
- *   ... --lenient email,phone,placement                       grade what the agent was never told as notes (lib/grade.ts Lenient)
+ *   ... --lenient email,phone,placement,status                grade what the agent was never told as notes (lib/grade.ts Lenient)
  *   ... --expect <file>                                       { externalId: { field: value | null } } over the answer key: what an answer set changes
  *
  * --all looks in the directory for <name>-<format>.ts, then <name>.ts, per
@@ -71,7 +71,7 @@ const out = value("out");
 const runDir = out ? resolve(out, "test-custom") : resolve("test-results", runName);
 const clerkRunsDir = out ? resolve(out, "clerk-runs") : resolve("clerk-runs", runName);
 const CLI_VERSION = cliVersion(CLI);
-const LENIENT_KEYS = ["email", "phone", "placement"] as const;
+const LENIENT_KEYS = ["email", "phone", "placement", "status"] as const;
 const EXPECT: Record<string, Record<string, unknown>> = value("expect") ? JSON.parse(readFileSync(value("expect")!, "utf8")) : {};
 const lenientArg = value("lenient")?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
 const badLenient = lenientArg.filter((k) => !(LENIENT_KEYS as readonly string[]).includes(k));

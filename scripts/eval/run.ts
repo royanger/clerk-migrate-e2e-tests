@@ -189,6 +189,7 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
     ...(told("email-verification") ? [] : ["email"]),
     ...(told("phone-verification") ? [] : ["phone"]),
     ...(told("metadata") ? [] : ["placement"]),
+    ...(told("status") ? [] : ["status"]),
   ];
   if (result.sourceFile && claim) {
     // The child grades on this run's target: it inherits the lock (PROVIDER_LOCKS) and is told which one.

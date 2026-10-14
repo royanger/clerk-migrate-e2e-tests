@@ -488,9 +488,11 @@ over checks made, and a user that never landed fails all of its checks.
 **What the agent was never told counts as a note.** When no answer told the
 agent how verification is marked, importing an email or phone as unverified
 (the skill's safe default) is a note, not a failure. When no answer said where
-metadata goes, any metadata field passes. `eval:sources` works this out from the
-questions and answers and passes `--lenient email,phone,placement` to
-`test:custom`; each `result.md` lists what was graded leniently.
+metadata goes, any metadata field passes. When no answer said what an account
+state means, banned where the key skips (or skipped where it bans, or not
+banned at all) is a note. `eval:sources` works this out from the questions and
+answers and passes `--lenient email,phone,placement,status` to `test:custom`;
+each `result.md` lists what was graded leniently.
 
 **The report** (`test-results/<stamp>-custom*/report.md`, or `--out`) groups
 failures by field and reason: five users with a broken phone make one problem
