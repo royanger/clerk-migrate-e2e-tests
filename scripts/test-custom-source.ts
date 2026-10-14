@@ -139,7 +139,7 @@ async function runOne(name: string, source: string): Promise<Result> {
 
   try {
     const existing = await settledCount();
-    if (existing) throw new Error(`Clerk instance already has ${existing} users — run pnpm teardown first`);
+    if (existing) throw new Error(`Clerk instance ${claim.target.name}: ${claim.target.app} ${claim.target.instance} already has ${existing} users — run pnpm teardown first`);
     const config = configForUsers(key.users);
     writeFileSync(join(dir, "clerk-config.json"), JSON.stringify(config, null, 2));
     await patchConfig(withBaseline(config));

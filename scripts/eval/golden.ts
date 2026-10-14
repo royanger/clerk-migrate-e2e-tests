@@ -131,7 +131,7 @@ async function main() {
         let importRun: string | undefined;
         try {
           const existing = await clerk.settledCount();
-          if (existing) throw new Error(`instance already has ${existing} users: run pnpm teardown`);
+          if (existing) throw new Error(`instance ${t.name}: ${t.app} ${t.instance} already has ${existing} users: run pnpm teardown`);
           const imp = await clerk.cli([
             "migrate", "import", file, "--yes", "--json", ...(allowPartial ? ["--allow-partial"] : []), ...target, "--runs-dir", runs,
           ]);

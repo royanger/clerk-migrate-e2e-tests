@@ -130,11 +130,15 @@ const SOURCES: Record<string, Source> = {
   },
 };
 
+/** Temp files to remove when the run exits, under one listener for the whole run. */
+const tempFiles = new Set<string>();
+process.once("exit", () => tempFiles.forEach((file) => rmSync(file, { force: true })));
+
 /** Writes a service-account JSON to a private temp file, removed when the run exits. */
 function serviceAccountFile(json: string) {
   const file = join(tmpdir(), `sa-${process.pid}-${createHash("sha256").update(json).digest("hex").slice(0, 8)}.json`);
   writeFileSync(file, json, { mode: 0o600 });
-  process.once("exit", () => rmSync(file, { force: true }));
+  tempFiles.add(file);
   return file;
 }
 
@@ -201,6 +205,8 @@ async function script(file: string, args: string[], env: Record<string, string> 
 }
 
 const target = ["--app", TARGET.app, "--instance", TARGET.instance];
+/** The destination as pnpm teardown's picker shows it, for errors that send the reader there. */
+const targetLabel = `${targetName}: ${TARGET.app} ${TARGET.instance}`;
 
 const patchDest = (body: object) => clerkPatch(target, body);
 
@@ -244,12 +250,16 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
   const runsDir = ["--runs-dir", clerkRunsDir];
   let importRun: string | undefined;
   let preCreated: string[] = [];
+  /* For Clerk as a source, the source is usually the destination itself (Stage 7):
+   * a seed left behind by a failed export is a full instance for every later
+   * variation. Set once seeded, cleared once the source is reset. */
+  let seedInDest = false;
 
   try {
     // Guard: the destination has to start empty, or the counts mean nothing.
     // Seeding alone never touches the destination, so it doesn't care what is in it.
     const existing = seedOnly ? 0 : await settledCount();
-    if (existing) throw new Error(`Clerk instance already has ${existing} users — run pnpm teardown first`);
+    if (existing) throw new Error(`Clerk instance ${targetLabel} already has ${existing} users — run pnpm teardown first`);
 
     // 1–2. Clean source, then its config, then the seed. Reset first, so it
     // cannot tear down a connection or table the config step just made.
@@ -263,6 +273,7 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
       throw new Error(`${seeded.length} users is over the dev instance's 100 — use a 10k target`);
     const usersFile = join(dir, "users.json");
     writeFileSync(usersFile, JSON.stringify({ seedPassword: seed.seedPassword, users: seeded }));
+    seedInDest = provider === "clerk" && SOURCE.instance === TARGET!.instance && !seedOnly;
     if (v.seed) await v.seed(seeded, seed.seedPassword);
     else await script("scripts/seed.ts", ["-p", provider!, "-r"], { SEED_USERS_FILE: usersFile });
     await mod.afterSeed?.(seeded);
@@ -287,6 +298,7 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
 
     // 4. The seed has done its job; the export file is the source of truth now.
     await resetSource();
+    seedInDest = false;
     if (exportTo) {
       const exportRun = exp.json.run.id as string;
       mkdirSync(dirname(resolve(exportTo)), { recursive: true });
@@ -368,6 +380,8 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     // "fetch failed" alone says nothing about which call; keep the whole chain.
     appendFileSync(join(runDir, "log.txt"), `!! ${v.id} × ${dest}: ${error instanceof Error ? `${error.stack}\ncause: ${String((error as { cause?: unknown }).cause)}` : String(error)}\n`);
   } finally {
+    if (seedInDest)
+      await resetSource().catch((e) => row.notes.push(`could not empty the seeded source: ${String(e).slice(0, 200)}`));
     // 9. Undo, even after a failed verify, so the next run starts empty.
     if (importRun) {
       const undoArgs = ["migrate", "undo", importRun, "--yes", "--json", ...target, ...runsDir];
