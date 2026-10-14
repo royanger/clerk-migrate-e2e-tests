@@ -19,11 +19,13 @@ import {
   interruptImport,
   latestLines,
   readRun,
+  runFix,
   runIds,
   summarize,
   usersWhenSettled,
   want,
   type Check,
+  type CliResult,
   type Ctx,
 } from "./context";
 
@@ -36,6 +38,42 @@ export const supabaseFile = (ctx: Ctx, name: string, users: SeedUser[]) =>
 /** `n` email users with a password: the plainest import there is. */
 export const plainUsers = (ctx: Ctx, n: number, offset = 0) =>
   ctx.seed.users.filter((u) => u.group === "email-only" && u.hasPassword).slice(offset, offset + n);
+
+type Fix = { label: string; command?: string };
+const fixesOf = (dry: CliResult) => (dry.json?.checks?.fixes ?? []) as Fix[];
+
+/** Pushes an issue for each of `expected` no offered fix's label matches. */
+function wantFixes(issues: string[], dry: CliResult, expected: RegExp[]) {
+  const labels = fixesOf(dry).map((f) => f.label);
+  for (const re of expected) {
+    want(issues, labels.some((l) => re.test(l)), `no fix matching ${re} offered (got: ${labels.join("; ") || "none"})`);
+  }
+}
+
+/**
+ * Runs each fix a dry run offered as a user would paste it, then dry-runs
+ * again with `again`. The fixes are what users paste: each must patch the
+ * live instance, and together they must clear the rejects and leave nothing
+ * more to fix.
+ */
+async function applyFixes(ctx: Ctx, issues: string[], dry: CliResult, again: () => Promise<CliResult>) {
+  const fixes = fixesOf(dry);
+  for (const fix of fixes) {
+    if (!fix.command?.startsWith("clerk config patch ")) {
+      issues.push(`fix "${fix.label}": no \`clerk config patch\` command (${fix.command ?? "none"})`);
+      continue;
+    }
+    const applied = await runFix(ctx, fix.command);
+    ctx.log(`   (ran fix "${fix.label}": exit ${applied.code})`);
+    want(issues, applied.code === 0, `fix "${fix.label}" exited ${applied.code}: ${applied.stderr.trim().split("\n").slice(-2).join(" ")}`);
+  }
+  if (!fixes.length) return;
+  const fixed = await again();
+  const left = (fixed.json?.checks?.rejects ?? []).length;
+  want(issues, fixed.code === 0 && left === 0, `after the fixes: expected exit 0 and no rejects, got exit ${fixed.code} and ${left} rejects`);
+  const still = fixesOf(fixed).map((f) => f.label);
+  want(issues, still.length === 0, `after the fixes, still offered: ${still.join("; ")}`);
+}
 
 export const checks: Check[] = [
   {
@@ -167,8 +205,80 @@ export const checks: Check[] = [
         const refused = await importFile(ctx, file, "supabase", ["--yes", "--json"]);
         want(issues, refused.code === 2 && refused.json?.refused === true, `rejects without --allow-partial: expected a refusal, got ${refused.code}`);
         want(issues, (await ctx.settledCount(5_000)) === 0, "a refused import created users");
+        await applyFixes(ctx, issues, dry, () => importFile(ctx, file, "supabase", ["--dry-run", "--json"]));
       } finally {
         await ctx.patchDest(DESTS.D1);
+      }
+      return issues;
+    },
+  },
+  {
+    id: "1.4b",
+    name: "the offered fixes patch MFA and user_model: TOTP and backup codes off, first name required, last name off",
+    async run(ctx) {
+      const issues: string[] = [];
+      const seeded = plainUsers(ctx, 6);
+      const file = ctx.write(
+        "mfa-names.csv",
+        clerkCsv(seeded, ctx.seed.seedPassword, (u, row) => {
+          const i = seeded.indexOf(u);
+          return {
+            ...row,
+            // Every user has a last name; two have no first name.
+            first_name: i === 2 || i === 3 ? undefined : "Ada",
+            last_name: "Lovelace",
+            ...(i < 2 && { totp_secret: "JBSWY3DPEHPK3PXP", backup_codes: "code1a2b,code3c4d" }),
+          };
+        }),
+      );
+      const before = (await ctx.cli(["config", "pull", ...ctx.target])).json;
+      await ctx.patchDest({
+        auth_multi_factor: { authenticator_app: { enabled: false }, backup_code: { enabled: false } },
+        user_model: { first_name: { enabled: true, required: true }, last_name: { enabled: false, required: false } },
+      });
+      try {
+        const dry = await importFile(ctx, file, "clerk", ["--dry-run", "--json"]);
+        const rejects = (dry.json?.checks?.rejects ?? []) as { reason: string }[];
+        want(issues, rejects.length === 4, `expected 4 rejects (2 MFA, 2 no first name), got ${JSON.stringify(rejects).slice(0, 300)}`);
+        wantFixes(issues, dry, [/authenticator app/i, /backup code/i, /first name.*optional/i, /enable last name/i]);
+        await applyFixes(ctx, issues, dry, () => importFile(ctx, file, "clerk", ["--dry-run", "--json"]));
+      } finally {
+        const mfa = before?.auth_multi_factor;
+        const names = before?.user_model;
+        await ctx.patchDest({
+          auth_multi_factor: {
+            authenticator_app: { enabled: mfa?.authenticator_app?.enabled ?? false },
+            backup_code: { enabled: mfa?.backup_code?.enabled ?? false },
+          },
+          user_model: {
+            first_name: { enabled: names?.first_name?.enabled ?? true, required: names?.first_name?.required ?? false },
+            last_name: { enabled: names?.last_name?.enabled ?? true, required: names?.last_name?.required ?? false },
+          },
+        });
+      }
+      return issues;
+    },
+  },
+  {
+    id: "1.4c",
+    name: "the offered fix patches connection_oauth_github: GitHub users while GitHub is off",
+    async run(ctx) {
+      const issues: string[] = [];
+      const seeded = plainUsers(ctx, 6).map((u, i) => ({
+        ...u,
+        oauth: ["github"],
+        // Half sign in with GitHub only.
+        ...(i % 2 === 0 && { hasPassword: false }),
+      }));
+      const file = supabaseFile(ctx, "github.json", seeded);
+      const before = (await ctx.cli(["config", "pull", ...ctx.target])).json;
+      await ctx.patchDest({ connection_oauth_github: { enabled: false } });
+      try {
+        const dry = await importFile(ctx, file, "supabase", ["--dry-run", "--json"]);
+        wantFixes(issues, dry, [/enable github sign-in/i]);
+        await applyFixes(ctx, issues, dry, () => importFile(ctx, file, "supabase", ["--dry-run", "--json"]));
+      } finally {
+        await ctx.patchDest({ connection_oauth_github: { enabled: before?.connection_oauth_github?.enabled ?? false } });
       }
       return issues;
     },
@@ -198,8 +308,12 @@ export const checks: Check[] = [
       const users = plainUsers(ctx, 3);
       const before = runIds(ctx).length;
       const rot13 = ctx.write("rot13.csv", clerkCsv(users, ctx.seed.seedPassword, (u, row) => (u === users[0] ? { ...row, password_hasher: "rot13" } : row)));
+      // An unknown hasher rejects that user, naming it in the checks; the import
+      // is then refused like any other with a reject.
       const hasher = await importFile(ctx, rot13, "clerk", ["--yes", "--json"]);
-      want(issues, hasher.code === 2 && /hasher/i.test(errorOf(hasher)), `unknown hasher: exit ${hasher.code}, ${errorOf(hasher)}`);
+      const hasherRejects: { reason: string }[] = hasher.json?.checks?.rejects ?? [];
+      want(issues, hasher.code === 2 && hasher.json?.refused === true, `unknown hasher: exit ${hasher.code}, ${errorOf(hasher)}`);
+      want(issues, hasherRejects.length === 1 && /Unknown password hasher "rot13"/.test(hasherRejects[0].reason), `unknown hasher: rejects ${JSON.stringify(hasherRejects).slice(0, 200)}`);
       const file = supabaseFile(ctx, "plain.json", users);
       const source = await importFile(ctx, file, "nope", ["--yes", "--json"]);
       want(issues, source.code === 2 && /clerk/.test(errorOf(source)) && /supabase/.test(errorOf(source)), `unknown source: exit ${source.code}, ${errorOf(source)}`);

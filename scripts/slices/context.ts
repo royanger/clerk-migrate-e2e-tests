@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClerkClient, User } from "@clerk/backend";
 import { cliArgv } from "../lib/clerk-run";
+import { run } from "../lib/run";
 import type { SeedUser } from "../lib/users";
 
 export type CliResult = { code: number; json: any; stdout: string; stderr: string };
@@ -71,6 +72,16 @@ export const runIds = (ctx: Ctx) =>
   existsSync(ctx.runsDir)
     ? readdirSync(ctx.runsDir).filter((id) => existsSync(join(ctx.runsDir, id, "run.json"))).sort()
     : [];
+
+/**
+ * Runs a fix's `clerk config patch …` command as a user would paste it, through
+ * bash with `clerk` as the CLI under test. `--yes` stands in for the prompt.
+ */
+export function runFix(ctx: Ctx, command: string) {
+  const quote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+  const clerk = cliArgv(ctx.cliPath).map(quote).join(" ");
+  return run("bash", ["-c", `clerk() { ${clerk} "$@"; }\n${command} --yes`], ctx.cliEnv(), { timeoutMs: 60_000 });
+}
 
 /** Pushes `message` when `ok` is false. */
 export function want(issues: string[], ok: boolean, message: string) {

@@ -82,6 +82,8 @@ const CLERK_COLUMNS = [
   "unverified_phone_numbers",
   "password_digest",
   "password_hasher",
+  "totp_secret",
+  "backup_codes",
 ] as const;
 
 type ClerkRow = Partial<Record<(typeof CLERK_COLUMNS)[number], string>>;
