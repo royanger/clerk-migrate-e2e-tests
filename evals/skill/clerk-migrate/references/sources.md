@@ -94,7 +94,7 @@ Ask all six in one turn, every time, even when the file seems to answer one. For
 5. **Metadata.** Which fields go to `publicMetadata`, `privateMetadata` or `unsafeMetadata`? See [Metadata](#metadata).
 6. **Account state.** Which fields mark a user banned, disabled, locked or suspended, and which mark a deleted user? Check status strings, flag arrays and bitmasks, and ask about every flag or bit whose meaning the data doesn't show.
    - Any state that stops a user signing in imports as `banned: true`: banned, disabled, suspended, locked, even a temporary lock. The import can't create a locked user, and an admin can unban later.
-   - Use `skipReason` only for users the data marks as gone (deleted, anonymized), or a group the user names by a field (test accounts). Never for a state that only stops sign-in. See [Leaving users out](#leaving-users-out).
+   - Use `skipReason` only for users the data marks as gone (deleted, anonymized), or a group the user names by a field that says nothing about sign-in (test accounts, staff). A state that stops sign-in imports banned even when the user calls those accounts deleted or gone, because the data records a lock, not a deletion. List that conflict in your summary. See [Leaving users out](#leaving-users-out).
 
 ### Check every answer against the file
 
@@ -104,7 +104,7 @@ Before you act on an answer, compare it with the data. When they disagree, say w
 - told "they're all US numbers", but a `region` column holds `GB` and `DE`: use the region
 - told "everyone is verified", but `emailConfirmed` is `false` for some users: those stay unverified
 - told to drop some users, but nothing in the data marks them: ask which field does
-- told to skip users the data marks `suspended` or `locked`: import them banned, since the data doesn't say deleted
+- told that users the data marks `suspended`, `locked` or `disabled` were deleted, or to skip them: import them banned, since the data doesn't say deleted
 
 When the file carries an explicit signal (a hash prefix, a verified flag, a region column, a status value), the data wins, even if the user repeats their answer after seeing the conflict. A `$2b$` digest is bcrypt whatever anyone remembers, and a `GB` number is not a US number. Follow the user only where the file is silent. A field with no flag of its own is silent: if `emailConfirmed` covers only the primary email and the user says every email is verified, the secondary emails go in verified. The user also wins when they name something that happened outside the system, which the file had no way to record: if support confirmed a number by phone, it goes in verified even though its flag says it isn't. Don't stop the migration over a disagreement, and list each conflict and how you settled it in your summary.
 
@@ -126,15 +126,34 @@ CRM IDs, billing IDs, internal notes and risk scores stay in `privateMetadata` e
 
 ### Password hashes
 
-Work out the format from the digests, then set `passwordHasher`:
+Work out the format from the digests, then set `passwordHasher`. "As-is" means the digest goes in unchanged.
 
 | The digest looks like | `passwordHasher` |
 | --- | --- |
-| `$2a$…`, `$2b$…`, `$2y$…` | `bcrypt` |
-| `$argon2id$…`, `$argon2i$…` | `argon2id`, `argon2i` |
+| `$2a$…`, `$2b$…`, `$2y$…` | `bcrypt`, as-is. The cost (the number after the prefix) must be 15 or less |
+| bcrypt over the password with an app-wide pepper appended | `bcrypt_peppered`: append `$<pepper>` to the bcrypt digest |
+| `bcrypt_sha256$$2b$…` (Django) | `bcrypt_sha256_django`, as-is |
+| `$argon2id$v=19$m=…,t=…,p=…$…`, `$argon2i$…` | `argon2id`, `argon2i`, as-is. `t` must be 20 or less, `p` 16 or less, `m` 1048576 (1 GiB) or less |
 | `pbkdf2_sha256$<iterations>$<salt>$<base64 key>` | `pbkdf2_sha256_django` or `pbkdf2_sha256`: see below |
 | `pbkdf2:sha256:<iterations>:<salt>:<base64 key>`, or other separators | the same: rebuild it as `pbkdf2_sha256$…` first |
 | `pbkdf2:sha256:<iterations>$<salt>$<hex key>` (Werkzeug, Flask) | `pbkdf2_sha256_django`: the salt is text. Convert the hex key to base64 and rebuild it as `pbkdf2_sha256$…` |
+| `$pbkdf2-sha256$<iterations>$<salt>$<key>` (passlib, Python) | `pbkdf2_sha256`: passlib hashes the salt's decoded bytes. Salt and key are in passlib's base64: swap `.` for `+` and pad each with `=` to a multiple of 4, then rebuild it as `pbkdf2_sha256$…` |
+| `pbkdf2_sha1$<iterations>$<salt>$<base64 key>` (Django) | `pbkdf2_sha1`: rebuild it as `pbkdf2_sha1$<iterations>$<hex salt>$<hex key>$20`. Hex-encode the salt's text, and convert the key from base64 to hex. `20` is the key length in bytes |
+| `$pbkdf2$<iterations>$<salt>$<key>` (passlib) | `pbkdf2_sha1`: decode salt and key from passlib's base64 (as above), then rebuild it as `pbkdf2_sha1$<iterations>$<hex salt>$<hex key>$20` |
+| PBKDF2-SHA512 with a text salt | `pbkdf2_sha512`: `pbkdf2_sha512$<iterations>$<salt>$<hex key>`, the salt as stored. Iterations must be 420,000 or fewer |
+| PBKDF2-SHA512 with a random-bytes salt; `$pbkdf2-sha512$…` (passlib) | `pbkdf2_sha512_hex`: `pbkdf2_sha512_hex$<iterations>$<hex salt>$<hex key>`. Decode passlib's base64 (as above) first. Iterations must be 420,000 or fewer |
+| `$P$…` (WordPress, phpass), `$S$…` (Drupal 7) | `phpass`, as-is |
+| `$H$…` (phpBB) | `phpass`: the same algorithm as `$P$`. Replace `$H$` with `$P$` |
+| `U$P$…` (Drupal 7, users carried over from Drupal 6) | `md5_phpass`: remove the leading `U` |
+| `{SSHA}…` (LDAP) | `ldap_ssha`, as-is |
+| `scrypt:<N>:<r>:<p>$<salt>$<hex key>` (Werkzeug, Flask) | `scrypt_werkzeug`, as-is |
+| Firebase scrypt | `scrypt_firebase`: use the built-in `firebase` source, which builds the digest |
+| 32 hex characters, no salt | `md5`, as-is. Ask first: a salt stored in another column makes a salted hash look the same |
+| 64 hex characters, no salt | `sha256`, as-is. Ask first, as for `md5` |
+| hex MD5 or SHA-256 of the password with a salt appended | `md5_salted`, `sha256_salted`: `<hex hash>$<salt>`, the salt as stored. A salt prepended to the password has no hasher |
+| Symfony's legacy SHA-512 encoder (`password{salt}`, base64 digest) | `sha512_symfony`: `sha512_symfony$<iterations>$<salt>$<base64 digest>`. The salt may hold only letters, digits, `.` and `/`. Iterations must be 100,000 or fewer (Symfony's default is 5,000) |
+| HMAC-SHA256 over the UTF-16LE password, keyed by UTF-16LE text (.NET `Encoding.Unicode`) | `hmac_sha256_utf16_b64`: `hmac_sha256_utf16_b64$<base64 digest>$<key>` |
+| AWS Cognito (no digest is exportable) | `awscognito`: `awscognito#<user pool ID>#<app client ID>#<username>`. Clerk checks the password against Cognito at the user's first sign-in. Clerk has to enable this for the instance first: ask the user to contact Clerk support |
 
 - **Strip wrapper prefixes.** `bcrypt:$2b$10$…` goes in as `$2b$10$…`.
 - **PBKDF2-SHA256: pick the hasher by how the old system used the salt.** Both hashers take the same string, `pbkdf2_sha256$<iterations>$<salt>$<base64 key>`, and differ only in how they read the salt. A wrong pick still imports, then fails at every sign-in, and the import's checks can't catch it.
@@ -142,10 +161,22 @@ Work out the format from the digests, then set `passwordHasher`:
   - The salt is base64 of the random bytes that were hashed: use `pbkdf2_sha256`, with the salt still in base64.
   - Ask the user when the export doesn't say. A salt that isn't valid base64 can only be text.
   - If the user can't tell, read the salts. When no salt in the export contains `+`, `/`, `=`, `-` or `_`, they're text: use `pbkdf2_sha256_django`. Random base64, standard or URL-safe, across a dozen or more salts would almost certainly include one of those characters. Drop the passwords only when the salts still leave it open, such as a handful of users, or some salts with any of those characters.
-- **PBKDF2 limits.** The key must be 32 bytes, which is 44 base64 characters. Convert a hex key to base64. Iterations must be 2,000,000 or fewer.
-- **Rebuild split formats.** An export that keeps PBKDF2-SHA256 in parts (iterations, salt, key) goes into Clerk as the one string above.
+- **PBKDF2-SHA256 limits.** The key must be 32 bytes, which is 44 base64 characters. Convert a hex key to base64. Iterations must be 2,000,000 or fewer.
+- **Rebuild split formats.** An export that keeps a digest in parts (iterations, salt, key) goes into Clerk as the one string its row shows.
 - **Detect the hasher per user.** One export can mix formats.
-- **No match:** leave the password out, set `passwordDropped: true`, and tell the user those users will reset their password. Don't guess a hasher.
+- **Not in the table:** before dropping the password, check whether Clerk has added a hasher since this skill was written. Print the `PasswordHasher` entry from the newest Backend API spec:
+
+  ```sh
+  latest=$(curl -fsSL https://api.github.com/repos/clerk/openapi-specs/contents/bapi \
+    | grep -o '"name": *"[0-9-]*\.yml"' | grep -o '[0-9-]*\.yml' | sort | tail -1)
+  curl -fsSL "https://raw.githubusercontent.com/clerk/openapi-specs/main/bapi/$latest" \
+    | sed -n '/^    PasswordHasher:/,/^    [A-Za-z]/p' | sed '$d'
+  ```
+
+  If that prints nothing, the spec's layout changed: search the same file with `grep -n -A20 'PasswordHasher:'`. If the entry has an `enum`, that is the list of names; otherwise read them from its description. The spec can lag behind: a hasher in this table but missing from the spec is still supported.
+
+  The spec names hashers but doesn't say what digest each expects. For a name that is in the spec but not in this table, ask the user how the old system built its digests, and use it only when they can describe the format. The CLI also has to know the name: run `clerk@latest`, and if the dry run rejects the hasher, the error lists every name the CLI accepts.
+- **Still no match:** leave the password out, set `passwordDropped: true`, and tell the user those users will reset their password. Don't guess a hasher.
 
 ### Common export shapes
 
@@ -215,7 +246,7 @@ TypeScript works (Bun's transpiler is part of the runtime), and so does plain `.
 1. **No imports.** The file cannot import helpers from the CLI; a compiled binary has nothing to import from. Write anything `postTransform` needs inline.
 2. **Something must map to `userId`.** The CLI refuses a source without it. Without `external_id`, a migration cannot be re-run or undone.
 3. **Declare `carries`.** The CLI refuses a source without it.
-4. **Do not edit a registry.** There is no source tree to register in. Instructions that say registration is mandatory describe the old standalone tool.
+4. **Do not edit a registry.** There is no source tree to register in.
 5. **Leave users out with `skipReason`,** never by removing rows. See [Leaving users out](#leaving-users-out).
 
 ### Preprocessing wrapped or headerless files
@@ -277,7 +308,7 @@ Validation drops anything not in this schema, so target these names exactly.
 
 Every user needs at least one identifier: email, phone, or username. The import's checks reject users without one.
 
-`passwordHasher` must be one of: `argon2i`, `argon2id`, `awscognito`, `bcrypt`, `bcrypt_peppered`, `bcrypt_sha256_django`, `hmac_sha256_utf16_b64`, `ldap_ssha`, `md5`, `md5_phpass`, `md5_salted`, `pbkdf2_sha1`, `pbkdf2_sha256`, `pbkdf2_sha256_django`, `pbkdf2_sha512`, `pbkdf2_sha512_hex`, `scrypt_firebase`, `scrypt_werkzeug`, `sha256`, `sha256_salted`, `sha512_symfony`. An unrecognized value aborts the run before anything is sent.
+`passwordHasher` must be one of the hashers in [Password hashes](#password-hashes). An unrecognized value aborts the run before anything is sent.
 
 ## After writing one
 
