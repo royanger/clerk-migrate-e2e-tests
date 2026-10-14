@@ -130,6 +130,7 @@ missing key, an agent that isn't isolated, or one Clerk instance in two roles.
 |---|---|---|
 | `--app <id>` | `-a` | skip the picker and use that app's development instance |
 | `--production` | `-p` | production: with `-a`, that app's; alone, a picker of production instances |
+| `--all` | | every "Migration Testing - " instance (with `-p`, every production one); same as `a` in the picker |
 | `--yes` / `--dry-run` | `-y` / `-n` | delete for real / report only |
 | `--cli <path>` | | run a local Clerk CLI checkout |
 

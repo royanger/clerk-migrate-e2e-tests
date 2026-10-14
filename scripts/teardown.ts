@@ -7,6 +7,7 @@
  *   pnpm teardown                      pick an instance, confirm before deleting
  *   pnpm teardown -y                   skip the "delete N users?" prompt
  *   pnpm teardown -n                   dry run: links, then reports without changing
+ *   pnpm teardown --all                every instance in the account, one confirmation
  *   pnpm teardown --cli <path/to/cli.ts>   run a local CLI build via bun
  *
  * --cli swaps `clerk ...` for `bun --env-file=<cli>/.env.local <path> ...` and
@@ -35,6 +36,8 @@ import { flag, spell, value } from "./lib/args";
 
 /** The two apps this repo migrates into. Anything else is a wrong-account signal. */
 const REQUIRED_APPS = ["app_3JVnO515SfI9c8lo2l3KskmG7MQ", "app_3HYFnu4WUmQ1p5DS301lefhySiO"];
+/** Test and eval apps share this name prefix; only they are offered for teardown. */
+const TEST_APP_PREFIX = "Migration Testing - ";
 
 if (flag("help")) {
 
@@ -42,6 +45,8 @@ if (flag("help")) {
     `Usage: pnpm teardown [options]\n\n` +
       `  ${spell("app").padEnd(18)} app id to target; skips the picker\n` +
       `  ${spell("production").padEnd(18)} target the production instance (default: development)\n` +
+      `  ${spell("all").padEnd(18)} every test instance (with -p, every production one);\n` +
+      `  ${"".padEnd(18)} the picker's "a" option does the same\n` +
       `  ${spell("yes").padEnd(18)} skip confirmations (deleting users, and the local\n` +
       `  ${"".padEnd(18)} app list under --cli)\n` +
       `  ${spell("dryRun").padEnd(18)} show what would change without touching anything\n` +
@@ -214,10 +219,18 @@ if (cliPath) {
     );
     process.exit(1);
   }
-  inScope = REQUIRED_APPS.map((id) => apps.find((a) => a.application_id === id)!);
+  /* The two known apps prove the account. Every test/eval app is offered, those
+   * two first; they are all named "Migration Testing - ...". Anything else in
+   * the account (the migrate-baseline-* fixtures) holds users worth keeping. */
+  inScope = [
+    ...REQUIRED_APPS.map((id) => apps.find((a) => a.application_id === id)!),
+    ...apps.filter(
+      (a) => a.name.startsWith(TEST_APP_PREFIX) && !REQUIRED_APPS.includes(a.application_id),
+    ),
+  ];
 }
 
-// 3. Pick an app + instance from what actually exists.
+// 3. Pick instances from what actually exists.
 type Target = { appId: string; appName: string; env: string; instanceId: string };
 const targets: Target[] = inScope.flatMap((app) =>
   app.instances.map((i) => ({
@@ -231,15 +244,20 @@ const targets: Target[] = inScope.flatMap((app) =>
 const describe = (t: Target) => `${t.appName} — ${t.env}\n     ${t.appId}  ${t.instanceId}`;
 
 /* --production names the environment for an --app lookup. On its own it only
- * narrows the picker: bare `pnpm teardown` has no environment preference and
- * must offer every instance, production included. */
+ * narrows the picker (or --all): bare `pnpm teardown` has no environment
+ * preference and must offer every instance, production included. */
 const prodOnly = flag("production");
 const wantEnv = prodOnly ? "production" : "development";
 const wantApp = value("app");
 
-let target: Target | undefined;
+if (wantApp && flag("all")) {
+  console.error(`--app and --all pick different things. Use one.`);
+  process.exit(1);
+}
+
+let chosen: Target[];
 if (wantApp) {
-  target = targets.find((t) => t.appId === wantApp && t.env === wantEnv);
+  const target = targets.find((t) => t.appId === wantApp && t.env === wantEnv);
   if (!target) {
     console.error(
       `No ${wantEnv} instance for ${wantApp}. What exists:\n` +
@@ -247,209 +265,267 @@ if (wantApp) {
     );
     process.exit(1);
   }
+  chosen = [target];
 } else {
   const choices = prodOnly ? targets.filter((t) => t.env === "production") : targets;
-  console.log(`\nWhich ${prodOnly ? "production " : ""}instance should be torn down?\n`);
-  choices.forEach((t, i) => console.log(`  ${i + 1}. ${describe(t)}`));
+  if (flag("all")) {
+    chosen = choices;
+  } else {
+    console.log(`\nWhich ${prodOnly ? "production " : ""}instance should be torn down?\n`);
+    choices.forEach((t, i) => console.log(`  ${i + 1}. ${describe(t)}`));
+    console.log(`  a. All ${choices.length} of the above`);
 
-  const answer = await ask(`\nPick 1-${choices.length}: `);
-  target = choices[Number(answer) - 1];
-  if (!target) {
-    console.error(`"${answer}" is not one of the options.`);
+    const answer = await ask(`\nPick 1-${choices.length}, or a for all: `);
+    const picked = choices[Number(answer) - 1];
+    chosen = /^a(ll)?$/i.test(answer) ? choices : picked ? [picked] : [];
+    if (!chosen.length) {
+      console.error(`"${answer}" is not one of the options.`);
+      rl?.close();
+      process.exit(1);
+    }
+  }
+}
+
+/*
+ * A batch asks once, up front, with the whole list on screen — not once per
+ * instance, which would be a couple of dozen prompts to "y" through blind.
+ */
+const many = chosen.length > 1;
+if (many) {
+  console.log(`\nTearing down ${chosen.length} instances:\n`);
+  chosen.forEach((t) => console.log(`  ${describe(t)}`));
+  const ok =
+    dryRun ||
+    flag("yes") ||
+    (
+      await ask(
+        `\nDelete every user in all ${chosen.length} and reset their config? This cannot be undone. [y/N] `,
+      )
+    ).toLowerCase() === "y";
+  if (!ok) {
+    console.log("Stopping — nothing was changed.");
     rl?.close();
     process.exit(1);
   }
 }
-/* `--instance` takes dev/prod, not the environment_type spelling from apps list. */
-const instanceFlag = target.env === "production" ? "prod" : "dev";
-console.log(`\nTarget: ${target.appName} (${target.env}) ${target.instanceId}`);
 
-// 4. Link this directory to the chosen app if it is pointed somewhere else.
-type Check = { name: string; message?: string };
-const doctor = clerkOutput("doctor", "--json");
-const linkedApp = doctor
-  .slice(Math.max(doctor.search(/[[{]/), 0))
-  .match(/"name":\s*"Application reachable"[\s\S]*?(app_[A-Za-z0-9]+)/)?.[1];
+async function teardown(target: Target) {
+  /* `--instance` takes dev/prod, not the environment_type spelling from apps list. */
+  const instanceFlag = target.env === "production" ? "prod" : "dev";
+  console.log(`\nTarget: ${target.appName} (${target.env}) ${target.instanceId}`);
 
-if (linkedApp === target.appId) {
-  console.log(`Already linked to ${target.appId}.`);
-} else {
-  /* Linked even under --dry-run: it only moves a local pointer, and leaving it
-   * stale makes `clerk doctor` report the wrong app for the rest of the session. */
-  console.log(`Linked to ${linkedApp ?? "nothing"} — relinking to ${target.appId}...`);
-  clerk("link", "--app", target.appId);
-}
+  // 4. Link this directory to the chosen app if it is pointed somewhere else.
+  /* Skipped for a batch: there is no one app to point `clerk doctor` at, and
+   * every call below names its app and instance explicitly anyway. */
+  if (!many) {
+    const doctor = clerkOutput("doctor", "--json");
+    const linkedApp = doctor
+      .slice(Math.max(doctor.search(/[[{]/), 0))
+      .match(/"name":\s*"Application reachable"[\s\S]*?(app_[A-Za-z0-9]+)/)?.[1];
 
-const scope = ["--app", target.appId, "--instance", instanceFlag];
-
-// 5. Users.
-const { total_count: userCount } = clerkJson<{ total_count: number }>("api", "/users/count", ...scope);
-if (userCount === 0) {
-  console.log("\nNo users to delete.");
-} else {
-  console.log(`\n${userCount} user(s) in ${target.appName} (${target.env}).`);
-  const ok =
-    !dryRun &&
-    (flag("yes") ||
-      (await ask("Delete all of them? This cannot be undone. [y/N] ")).toLowerCase() === "y");
-
-  if (!ok) {
-    console.log(dryRun ? "[dry-run] would delete all of them." : "Leaving users in place.");
-  } else {
-    /*
-     * Collect every id before deleting any — paging while deleting shifts the
-     * offset out from under the next page and silently skips records.
-     */
-    const ids: string[] = [];
-    for (let offset = 0; ; offset += 500) {
-      const page = clerkJson<{ id: string }[]>("api", `/users?limit=500&offset=${offset}`, ...scope);
-      if (!page.length) break;
-      ids.push(...page.map((u) => u.id));
-    }
-
-    const failures = await pool(
-      ids,
-      4,
-      async (id) => void clerk("api", "-X", "DELETE", `/users/${id}`, "--yes", ...scope),
-      progressBar("deleted"),
-    );
-    if (failures.length) {
-      console.error(`\n${failures.length} user(s) failed to delete. First few:`);
-      for (const { item, error } of failures.slice(0, 5))
-        console.error(`  ${item}: ${String(error).slice(0, 200)}`);
-      process.exitCode = 1;
+    if (linkedApp === target.appId) {
+      console.log(`Already linked to ${target.appId}.`);
+    } else {
+      /* Linked even under --dry-run: it only moves a local pointer, and leaving it
+       * stale makes `clerk doctor` report the wrong app for the rest of the session. */
+      console.log(`Linked to ${linkedApp ?? "nothing"} — relinking to ${target.appId}...`);
+      clerk("link", "--app", target.appId);
     }
   }
-}
 
-// 6. Enterprise SSO connections (SAML/OIDC) are separate records, not config keys.
-const { data: enterprise } = clerkJson<{ data: { id: string; name?: string }[] }>(
-  "api",
-  "/enterprise_connections",
-  ...scope,
-);
-for (const c of enterprise) {
-  console.log(`${dryRun ? "[dry-run] would delete" : "Deleting"} enterprise connection ${c.name ?? c.id}`);
-  if (dryRun) continue;
-  clerk("api", "-X", "DELETE", `/enterprise_connections/${c.id}`, "--yes", ...scope);
-}
+  const scope = ["--app", target.appId, "--instance", instanceFlag];
 
-// 7. Instance config. Read first so only the keys that are actually wrong get patched.
-type Config = Record<string, Record<string, unknown> | null>;
-const config = clerkJson<Config>("config", "pull", ...scope);
+  // 5. Users.
+  const { total_count: userCount } = clerkJson<{ total_count: number }>("api", "/users/count", ...scope);
+  if (userCount === 0) {
+    console.log("\nNo users to delete.");
+  } else {
+    console.log(`\n${userCount} user(s) in ${target.appName} (${target.env}).`);
+    const ok =
+      !dryRun &&
+      (flag("yes") ||
+        many ||
+        (await ask("Delete all of them? This cannot be undone. [y/N] ")).toLowerCase() === "y");
 
-const patch: Record<string, unknown> = {
-  // Phone: not addable, not a sign-in or sign-up identifier, not a second factor.
-  auth_phone: {
-    used_for_sign_in: false,
-    used_for_sign_up: false,
-    required_for_sign_up: false,
-    used_for_second_factor: false,
-    verify_at_sign_up: false,
-    sign_in_strategies: [],
-    second_factor_strategies: [],
-    verification_strategies: [],
-  },
-  auth_username: { used_for_sign_in: false, used_for_sign_up: false, required_for_sign_up: false },
-  // `enabled: false` removes passwords entirely; `required` covers sign-up on its own.
-  auth_password: { enabled: false, required: false },
-  /* Biometrics are passkeys in Clerk — there is no separate biometric attribute,
-   * so every passkey switch that gates availability goes off. The fourth field,
-   * satisfies_second_factor, is not one of them: it says whether a passkey counts
-   * as 2FA, and the API rejects setting it false (409 invalid auth configuration). */
-  auth_passkey: { used_for_sign_in: false, allow_autofill: false, show_sign_in_button: false },
-  // Names stay collectable, just never mandatory.
-  user_model: {
-    first_name: { enabled: true, required: false },
-    last_name: { enabled: true, required: false },
-  },
-  // Email is the only identifier left: required, verified at sign-up, code not link.
-  auth_email: {
-    used_for_sign_up: true,
-    required_for_sign_up: true,
-    verify_at_sign_up: true,
-    used_for_sign_in: true,
-    sign_in_strategies: ["email_code"],
-    verification_strategies: ["email_code"],
-    immutable: false, // users can change their email address after sign-up
-  },
-  auth_multi_factor: {
-    authenticator_app: { enabled: false },
-    backup_code: { enabled: false },
-    required_for_sign_in: false,
-    required_for_sign_up: false,
-  },
-  auth_web3: {
-    used_for_sign_in: false,
-    used_for_sign_up: false,
-    required_for_sign_up: false,
-    verify_at_sign_up: false,
-    sign_in_strategies: [],
-    verification_strategies: [],
-  },
-  organization_settings: { enabled: false },
-  billing: { organization_enabled: false, user_enabled: false },
-};
+    if (!ok) {
+      console.log(dryRun ? "[dry-run] would delete all of them." : "Leaving users in place.");
+    } else {
+      /*
+       * Collect every id before deleting any — paging while deleting shifts the
+       * offset out from under the next page and silently skips records.
+       */
+      const ids: string[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const page = clerkJson<{ id: string }[]>("api", `/users?limit=500&offset=${offset}`, ...scope);
+        if (!page.length) break;
+        ids.push(...page.map((u) => u.id));
+      }
 
-/* Read the provider list off the instance rather than hardcoding it, so a
- * provider Clerk adds later still gets switched off. */
-for (const [key, value] of Object.entries(config)) {
-  if (!key.startsWith("connection_oauth_") || key === "connection_oauth_google") continue;
-  if (value?.enabled) patch[key] = { enabled: false };
-}
-for (const [key, value] of Object.entries(config.connections_oauth_custom ?? {})) {
-  if ((value as { enabled?: boolean } | null)?.enabled)
-    patch.connections_oauth_custom = {
-      ...(patch.connections_oauth_custom as object),
-      [key]: { enabled: false },
-    };
-}
+      const failures = await pool(
+        ids,
+        4,
+        async (id) => void clerk("api", "-X", "DELETE", `/users/${id}`, "--yes", ...scope),
+        progressBar("deleted"),
+      );
+      if (failures.length) {
+        console.error(`\n${failures.length} user(s) failed to delete. First few:`);
+        for (const { item, error } of failures.slice(0, 5))
+          console.error(`  ${item}: ${String(error).slice(0, 200)}`);
+        process.exitCode = 1;
+      }
+    }
+  }
 
-/*
- * Google is the one connection that stays. In development, Clerk supplies shared
- * credentials, so enabling it needs nothing else. In production it would need
- * real OAuth credentials this script has no way to supply, so a disabled
- * production Google connection is left disabled.
- */
-const googleEnabled = Boolean(config.connection_oauth_google?.enabled);
-if (!googleEnabled) {
-  if (instanceFlag === "dev") patch.connection_oauth_google = { enabled: true };
-  else console.log("Google is disabled in production — leaving it off (needs real OAuth credentials).");
-}
-
-console.log("\nApplying config...");
-const result = clerk("config", "patch", "--json", JSON.stringify(patch), ...scope, ...(dryRun ? ["--dry-run"] : []));
-/* The CLI prints a readable diff and then dumps the whole before/after config.
- * Keep the diff, drop the dump. */
-const dump = result.search(/^\{/m);
-process.stdout.write(dump < 0 ? result : result.slice(0, dump));
-/*
- * "Users can delete their account" is not in the config schema, and neither the
- * Backend API nor the Platform API accepts it — PATCH /instance and
- * PATCH /beta_features/instance_settings both take the field and ignore it. The
- * only place it reads back is the public FAPI environment payload, so check it
- * there and hand the fix back rather than reporting a reset that did not happen.
- */
-let deleteSelf: boolean | undefined;
-try {
-  const raw = clerkOutput("api", "--fapi", "/environment", ...scope);
-  deleteSelf = JSON.parse(raw.slice(raw.search(/[[{]/))).user_settings.actions.delete_self;
-} catch {
-  /* FAPI is reached over the instance's own domain, which a throwaway instance on
-   * a local backend may not actually serve. Unknown is reported, never fatal. */
-}
-
-if (deleteSelf === undefined)
-  console.log(`\n  Could not read the public environment payload — "users can delete their\n  account" was left unverified.`);
-else if (!deleteSelf)
-  console.warn(
-    `\n  Users cannot delete their own account, and no CLI command can change it.\n` +
-      `  Turn it on by hand: clerk open dashboard`,
+  // 6. Enterprise SSO connections (SAML/OIDC) are separate records, not config keys.
+  const { data: enterprise } = clerkJson<{ data: { id: string; name?: string }[] }>(
+    "api",
+    "/enterprise_connections",
+    ...scope,
   );
+  for (const c of enterprise) {
+    console.log(`${dryRun ? "[dry-run] would delete" : "Deleting"} enterprise connection ${c.name ?? c.id}`);
+    if (dryRun) continue;
+    clerk("api", "-X", "DELETE", `/enterprise_connections/${c.id}`, "--yes", ...scope);
+  }
 
-console.log(
-  dryRun
-    ? "\n[dry-run] nothing was changed. Re-run without --dry-run to apply."
-    : `\nDone. ${target.appName} (${target.env}) is back to the test baseline.`,
-);
+  // 7. Instance config. Read first so only the keys that are actually wrong get patched.
+  type Config = Record<string, Record<string, unknown> | null>;
+  const config = clerkJson<Config>("config", "pull", ...scope);
+
+  const patch: Record<string, unknown> = {
+    // Phone: not addable, not a sign-in or sign-up identifier, not a second factor.
+    auth_phone: {
+      used_for_sign_in: false,
+      used_for_sign_up: false,
+      required_for_sign_up: false,
+      used_for_second_factor: false,
+      verify_at_sign_up: false,
+      sign_in_strategies: [],
+      second_factor_strategies: [],
+      verification_strategies: [],
+    },
+    auth_username: { used_for_sign_in: false, used_for_sign_up: false, required_for_sign_up: false },
+    // `enabled: false` removes passwords entirely; `required` covers sign-up on its own.
+    auth_password: { enabled: false, required: false },
+    /* Biometrics are passkeys in Clerk — there is no separate biometric attribute,
+     * so every passkey switch that gates availability goes off. The fourth field,
+     * satisfies_second_factor, is not one of them: it says whether a passkey counts
+     * as 2FA, and the API rejects setting it false (409 invalid auth configuration). */
+    auth_passkey: { used_for_sign_in: false, allow_autofill: false, show_sign_in_button: false },
+    // Names stay collectable, just never mandatory.
+    user_model: {
+      first_name: { enabled: true, required: false },
+      last_name: { enabled: true, required: false },
+    },
+    // Email is the only identifier left: required, verified at sign-up, code not link.
+    auth_email: {
+      used_for_sign_up: true,
+      required_for_sign_up: true,
+      verify_at_sign_up: true,
+      used_for_sign_in: true,
+      sign_in_strategies: ["email_code"],
+      verification_strategies: ["email_code"],
+      immutable: false, // users can change their email address after sign-up
+    },
+    auth_multi_factor: {
+      authenticator_app: { enabled: false },
+      backup_code: { enabled: false },
+      required_for_sign_in: false,
+      required_for_sign_up: false,
+    },
+    auth_web3: {
+      used_for_sign_in: false,
+      used_for_sign_up: false,
+      required_for_sign_up: false,
+      verify_at_sign_up: false,
+      sign_in_strategies: [],
+      verification_strategies: [],
+    },
+    organization_settings: { enabled: false },
+    billing: { organization_enabled: false, user_enabled: false },
+  };
+
+  /* Read the provider list off the instance rather than hardcoding it, so a
+   * provider Clerk adds later still gets switched off. */
+  for (const [key, value] of Object.entries(config)) {
+    if (!key.startsWith("connection_oauth_") || key === "connection_oauth_google") continue;
+    if (value?.enabled) patch[key] = { enabled: false };
+  }
+  for (const [key, value] of Object.entries(config.connections_oauth_custom ?? {})) {
+    if ((value as { enabled?: boolean } | null)?.enabled)
+      patch.connections_oauth_custom = {
+        ...(patch.connections_oauth_custom as object),
+        [key]: { enabled: false },
+      };
+  }
+
+  /*
+   * Google is the one connection that stays. In development, Clerk supplies shared
+   * credentials, so enabling it needs nothing else. In production it would need
+   * real OAuth credentials this script has no way to supply, so a disabled
+   * production Google connection is left disabled.
+   */
+  const googleEnabled = Boolean(config.connection_oauth_google?.enabled);
+  if (!googleEnabled) {
+    if (instanceFlag === "dev") patch.connection_oauth_google = { enabled: true };
+    else console.log("Google is disabled in production — leaving it off (needs real OAuth credentials).");
+  }
+
+  console.log("\nApplying config...");
+  const result = clerk("config", "patch", "--json", JSON.stringify(patch), ...scope, ...(dryRun ? ["--dry-run"] : []));
+  /* The CLI prints a readable diff and then dumps the whole before/after config.
+   * Keep the diff, drop the dump. */
+  const dump = result.search(/^\{/m);
+  process.stdout.write(dump < 0 ? result : result.slice(0, dump));
+  /*
+   * "Users can delete their account" is not in the config schema, and neither the
+   * Backend API nor the Platform API accepts it — PATCH /instance and
+   * PATCH /beta_features/instance_settings both take the field and ignore it. The
+   * only place it reads back is the public FAPI environment payload, so check it
+   * there and hand the fix back rather than reporting a reset that did not happen.
+   */
+  let deleteSelf: boolean | undefined;
+  try {
+    const raw = clerkOutput("api", "--fapi", "/environment", ...scope);
+    deleteSelf = JSON.parse(raw.slice(raw.search(/[[{]/))).user_settings.actions.delete_self;
+  } catch {
+    /* FAPI is reached over the instance's own domain, which a throwaway instance on
+     * a local backend may not actually serve. Unknown is reported, never fatal. */
+  }
+
+  if (deleteSelf === undefined)
+    console.log(`\n  Could not read the public environment payload — "users can delete their\n  account" was left unverified.`);
+  else if (!deleteSelf)
+    console.warn(
+      `\n  Users cannot delete their own account, and no CLI command can change it.\n` +
+        `  Turn it on by hand: clerk open dashboard`,
+    );
+
+  console.log(
+    dryRun
+      ? "\n[dry-run] nothing was changed. Re-run without --dry-run to apply."
+      : `\nDone. ${target.appName} (${target.env}) is back to the test baseline.`,
+  );
+}
+
+/* One instance failing (a 409 on config, a network blip) should not strand the
+ * rest of a batch half-reset. A single target keeps the old fail-fast. */
+const failed: Target[] = [];
+for (const target of chosen) {
+  try {
+    await teardown(target);
+  } catch (error) {
+    if (!many) throw error;
+    console.error(`\nFailed: ${target.appName} (${target.env}): ${String(error).slice(0, 300)}`);
+    failed.push(target);
+    process.exitCode = 1;
+  }
+}
+if (many)
+  console.log(
+    failed.length
+      ? `\n${chosen.length - failed.length} of ${chosen.length} done. Failed:\n` +
+          failed.map((t) => `  ${describe(t)}`).join("\n")
+      : `\nAll ${chosen.length} instances done.`,
+  );
 rl?.close();
