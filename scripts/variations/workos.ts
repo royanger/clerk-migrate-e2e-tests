@@ -19,7 +19,7 @@
 import { WorkOS } from "@workos-inc/node";
 import type { User } from "@clerk/backend";
 import { pool, type SeedUser } from "../lib/users";
-import { expectLanded, mix, type ClerkSummary, type Variation } from "../lib/variations";
+import { expectLanded, mix, reserving, type ClerkSummary, type Variation } from "../lib/variations";
 
 const workos = () => new WorkOS(process.env.WORKOS_API_KEY!);
 
@@ -181,3 +181,8 @@ export const variations: Variation[] = [
     expect: check({ withVerifiedEmail: (s) => s.filter((u) => u.emailVerified).length }),
   },
 ];
+variations.push(
+  reserving(variations.find((v) => v.id === "W3")!),
+  // D2 requires an email: reserved, an unverified-only one meets it.
+  reserving(variations.find((v) => v.id === "W7")!, { dests: ["D2"] }),
+);

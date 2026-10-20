@@ -11,7 +11,7 @@ import { createClient } from "@libsql/client";
 import { authjsStatements, clearRows, tableNames } from "../lib/better-auth-schema";
 import { run } from "../lib/run";
 import type { SeedUser } from "../lib/users";
-import { everyNth, expectLanded, type Variation } from "../lib/variations";
+import { everyNth, expectLanded, reserving, type Variation } from "../lib/variations";
 
 /** A fresh client per step (see better-auth.ts: long idles kill pooled sockets). */
 const db = () =>
@@ -142,5 +142,6 @@ export const variations: Variation[] = [
     },
   },
 ];
+variations.push(reserving(variations.find((v) => v.id === "J2")!));
 
 const NAMES = ["Cher", "Prince", "Zendaya", "Ada Lovelace", "Jean-Luc Picard", "Mary Ann Evans", "Gabriel García Márquez"];

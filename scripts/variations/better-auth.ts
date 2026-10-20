@@ -11,7 +11,7 @@ import { APP_PLUGINS, clearRows, recreateSchema, type SchemaOptions } from "../l
 import { run } from "../lib/run";
 import type { SeedUser } from "../lib/users";
 import type { DestId } from "../lib/clerk-dest";
-import { everyNth, expectAllLanded, expectLanded, expectRejected, type Variation } from "../lib/variations";
+import { everyNth, expectAllLanded, expectLanded, expectRejected, reserving, type Variation } from "../lib/variations";
 
 /**
  * A fresh client per step. One long-lived client sits idle through the seed and
@@ -278,6 +278,7 @@ export const variations: Variation[] = [
     expect: expectAllLanded,
   },
 ];
+variations.push(reserving(variations.find((v) => v.id === "B3")!));
 
 /** Verified email, no username: users nothing else would reject. */
 const plain = (all: SeedUser[]) => all.filter((u) => u.email && u.emailVerified && !u.username);

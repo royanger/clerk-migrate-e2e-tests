@@ -345,6 +345,10 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 
 ## Every test
 
+Every variation also checks how unverified emails and phones landed. Without
+`--reserve-unverified` (the default, and what `-y`/`--json` keep), none may be
+reserved. An `R` variation passes the flag, and every one must be reserved.
+
 ### Auth0 (`-p auth0`)
 
 | ID | What it tests | Dests | Target |
@@ -363,6 +367,7 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 |---|---|---|---|
 | J1 | magic link only: a timestamp verifies each user | D1 | dev |
 | J2 | GitHub only: unverified emails, and 1 in 4 users shared no email at all | D1 | dev |
+| J2R | J2 with `--reserve-unverified`: the emails land reserved | D1 | dev |
 | J3 | email + GitHub: the exporter ignores account rows, so this exports like J1 | D1 | dev |
 | J4 | phone OTP: verified `<digits>@phone.local` placeholders, which Clerk refuses, so the dry run rejects those users | D1 | dev |
 | J5 | user table renamed to `users`: the exporter's fallback table name | D1 | dev |
@@ -379,6 +384,7 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 | B1 | core only: email + password, no plugin columns | D1 | dev |
 | B2 | + username plugin | D1 | dev |
 | B3 | + phone plugin: verified, unverified and no phone | D1 | dev |
+| B3R | B3 with `--reserve-unverified`: the unverified phones land reserved | D1 | dev |
 | B4 | + admin plugin: 1 in 5 banned, and they stay banned in Clerk | D1 | dev |
 | B5 | + 2FA plugin: 1 in 3 email users enrolled (the CLI documents that MFA doesn't carry over) | D1 | dev |
 | B6 | GitHub: social-only (no credential) and password + GitHub | D1 | dev |
@@ -439,10 +445,12 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 | W1 | email + password (WorkOS takes the bcrypt hash and never returns it) | D1 | dev |
 | W2 | no password (Magic Auth style): exports the same shape as W1 | D1 | dev |
 | W3 | unverified emails | D1 | dev |
+| W3R | W3 with `--reserve-unverified`: the emails land reserved | D1 | dev |
 | W4 | metadata: empty, at the limits (10 keys, 40-char keys, 600-char values), and the default | D1 | dev |
 | W5 | `external_id` at the 64-char limit, and name edge cases (unicode, first-only, last-only) | D1 | dev |
 | W6 | orgs, memberships, roles and TOTP factors: the export carries none, and the import must drop them without errors | D1 | dev |
 | W7 | combined: passwords, no password, unverified, metadata, `external_id`, orgs and TOTP | D1–D5 | dev |
+| W7R | W7 with `--reserve-unverified` on D2: an unverified-only email meets the email requirement | D2 | dev |
 
 ---
 

@@ -34,7 +34,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { User } from "@clerk/backend";
 import { DESTS, DEST_IDS, DEST_KEYS, type DestId } from "./lib/clerk-dest";
-import type { ClerkSummary, TargetName, Variation, VariationModule } from "./lib/variations";
+import { RESERVE, type ClerkSummary, type TargetName, type Variation, type VariationModule } from "./lib/variations";
 import { withRetry, type SeedUser } from "./lib/users";
 import { flag, value } from "./lib/args";
 import { clerkLock, lockProviders } from "./lib/lock";
@@ -360,6 +360,15 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
     writeFileSync(join(dir, "clerk-summary.json"), JSON.stringify(summary, null, 2));
     if (summary.total !== row.created) row.notes.push(`Clerk holds ${summary.total}, import said ${row.created}`);
     row.notes.push(...(v.expect?.(summary, seeded, dest, users) ?? []));
+    // Unverified emails and phones land reserved with --reserve-unverified, and only then.
+    // The @clerk/backend resources leave `reserved` out, so read the raw JSON.
+    const reserving = extra.includes(RESERVE);
+    const unverified = users
+      .flatMap((u) => [...(u.raw?.email_addresses ?? []), ...(u.raw?.phone_numbers ?? [])] as { reserved?: boolean; verification: { status: string } | null }[])
+      .filter((i) => i.verification?.status !== "verified");
+    const wrong = unverified.filter((i) => Boolean(i.reserved) !== reserving).length;
+    if (wrong) row.notes.push(`${wrong} of ${unverified.length} unverified identifiers ${reserving ? "not reserved, with" : "reserved, without"} ${RESERVE}`);
+    if (reserving && !unverified.length) row.notes.push(`${RESERVE}, but nothing landed unverified to reserve`);
     const pw = await verifyPasswords(users, allUsers.seedPassword);
     row.passwords = `${pw.checked - pw.failed.length}/${pw.checked}`;
     if (pw.failed.length) row.notes.push(`${pw.failed.length} passwords did not verify`);

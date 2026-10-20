@@ -97,6 +97,22 @@ export function expectRejected(
   return issues.length > 6 ? [...issues.slice(0, 6), `…and ${issues.length - 6} more`] : issues;
 }
 
+export const RESERVE = "--reserve-unverified";
+
+/**
+ * `v` imported with --reserve-unverified, as `<id>R`: its unverified emails and
+ * phones go on the create reserved. The runner checks every unverified
+ * identifier in Clerk is reserved in a variation that passes the flag, and
+ * none is in one that doesn't.
+ */
+export const reserving = (v: Variation, overrides: Partial<Variation> = {}): Variation => ({
+  ...v,
+  id: `${v.id}R`,
+  describe: `${v.describe}, created reserved (${RESERVE})`,
+  importArgs: [...(v.importArgs ?? []), RESERVE],
+  ...overrides,
+});
+
 /** A provider's variations file: the list, plus optional source lifecycle hooks. */
 export type VariationModule = {
   variations: Variation[];
