@@ -48,7 +48,7 @@ const SLICES: Record<string, Slice> = {
   "4d": { describe: "Better Auth export and import", providers: ["better-auth"] },
   "4e": { describe: "Auth.js export and import", providers: ["authjs"] },
   "5": { describe: "custom sources and migrate sources", checks: async () => (await import("./slices/slice5")).checks },
-  "6": { describe: "the gate removed", checks: async () => (await import("./slices/slice6")).checks },
+  "6": { describe: "the gate removed, and --reserve-unverified", checks: async () => (await import("./slices/slice6")).checks },
 };
 
 const argv = process.argv.slice(2);

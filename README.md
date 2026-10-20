@@ -324,7 +324,7 @@ pnpm test:migrate:slice2 --cli <cli.ts or a clerk binary> --only 2.4
 | 3 | `export clerk`, `export supabase` | `test:migrate -p clerk` and `-p supabase` |
 | 4a–4e | Firebase, Auth0, WorkOS, Better Auth, Auth.js | `test:migrate -p <provider>` |
 | 5 | custom sources, `migrate sources` | checks 5.1–5.3, with a made-up export and source of their own |
-| 6 | the gate removed | checks 6.1–6.2, with `CLERK_EXPERIMENTAL` unset |
+| 6 | the gate removed, and `--reserve-unverified` | checks 6.1–6.6: the gate off, then reserved identifiers meeting D2's email requirement, a continue keeping its run's choice, reserved duplicates, and a reserved email past a disabled provider |
 
 - **Clerk instances.** Every slice imports into `evals-1`, and Clerk as a
   provider is the migrate instance (`CLERK_MIGRATE_TESTS_1_*`). The `evals-1`

@@ -138,10 +138,11 @@ export async function interruptImport(
   source: string,
   after: number,
   env: Record<string, string> = {},
+  flags: string[] = [],
 ): Promise<{ code: number | null; signal: string | null; runId?: string; created: number }> {
   const before = new Set(runIds(ctx));
   const [bin, ...pre] = cliArgv(ctx.cliPath);
-  const args = ["migrate", "import", file, "--source", source, "--yes", "--allow-partial", "--json", ...ctx.target, "--runs-dir", ctx.runsDir];
+  const args = ["migrate", "import", file, "--source", source, "--yes", "--allow-partial", ...flags, "--json", ...ctx.target, "--runs-dir", ctx.runsDir];
   const child = spawn(bin, [...pre, ...args], { env: ctx.cliEnv(env), stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.resume();
   child.stderr.resume();
