@@ -145,7 +145,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     await clerk.patchConfig(targetArgs(claim.target), withBaseline(DESTS[set.meta.dest as DestId]));
 
     copyFileSync(exportFile(provider), join(root, "users-export.json"));
-    const ws = createWorkspace(root, agent, cfg, [join(root, "users-export.json")], "import", claim.target.secretKey);
+    const ws = createWorkspace(root, agent, cfg, [join(root, "users-export.json")], "import", claim.target);
     const vars = { file: "users-export.json", provider: PROVIDER_NAMES[provider] };
     const s = await runSession({
       agent, cfg, ws, access: "import", prompt: prompts.user(vars), system: prompts.system(vars), provider,

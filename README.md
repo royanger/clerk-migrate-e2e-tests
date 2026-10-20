@@ -524,7 +524,15 @@ Three evals, each run with Claude Code and Codex:
 3. **The `clerk` shim.** The agent's `clerk` runs `cli` from `evals/config.json`
    on a Clerk target the run claimed, logs every call, and refuses anything the
    eval doesn't allow. `undo` and `export` (outside migrations) are always
-   refused.
+   refused. In import and migration evals the agent is a customer who ran
+   `clerk auth login` and `clerk link`: it has the target's secret key, your
+   `clerk auth login` session, and its workspace linked to the target app in
+   the run's own CLI config folder, so `config patch` can change sign-in
+   settings once the customer says yes. Any other app or instance is refused.
+   The login is in the macOS keychain, which Codex's sandbox can't reach, so
+   the shim hands `config pull`, `config patch`, `config schema` and `doctor`
+   to the harness, which runs them outside the sandbox and passes back the
+   output and exit code. Both agents go through it.
 4. **Questions.** The agent ends each turn with questions, a finished job, or a
    blocker. A small model files each question under a topic, and the answer set
    replies. A question the set doesn't cover goes to its `fallback`: a fixed

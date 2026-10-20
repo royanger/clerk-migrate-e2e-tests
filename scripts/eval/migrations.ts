@@ -200,7 +200,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     if (await clerk.settledCount()) await deleteAllUsers(clerk.clerk);
     await clerk.patchConfig(targetArgs(claim.target), withBaseline(DESTS[set.meta.dest as DestId]));
 
-    const ws = createWorkspace(root, agent, cfg, [], "migrate", claim.target.secretKey);
+    const ws = createWorkspace(root, agent, cfg, [], "migrate", claim.target);
     const vars = { provider: FROM[provider] };
     const s = await runSession({
       agent, cfg, ws, access: "migrate", prompt: prompts.user(vars), system: prompts.system(vars), provider,

@@ -11,12 +11,14 @@
  *           auth.json, which drops ~/.codex/AGENTS.md, config and
  *           ~/.agents/skills. Codex's built-in system skills remain.
  */
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { SetupError } from "../lib/clerk-run";
 import { lockProviders } from "../lib/lock";
 import { run } from "../lib/run";
+import type { ClerkTarget } from "../lib/targets";
 import { cliArgv, SKILL_DIR, type AgentName, type EvalConfig } from "./config";
 
 /** What the agent's `clerk` may run. */
@@ -59,14 +61,20 @@ export type Workspace = {
   calls: string;
   /** Holds the current question round, which the shim stamps on each call. */
   roundFile: string;
+  /** The CLI's config folder (CLERK_CONFIG_DIR): the run's own link, never your linked projects. */
+  clerkConfig: string;
+  /** Set when the workspace is linked: the harness runs the agent's account-mode calls (see serveBroker). */
+  broker?: { dir: string; target: ClerkTarget; cli: string };
 };
 
 /**
  * Builds `root/ws` with `files` copied in and the skill where `agent` looks for
  * project skills, plus a `clerk` shim limited to `access`.
  *
- * @param secretKey - Baked into the shim for `dry-run` and `import`. Codex strips
- *   *KEY* variables from its shell, so the environment cannot carry it.
+ * @param target - The Clerk instance the run claimed. Its secret key is baked
+ *   into the shim for `dry-run`, `import` and `migrate`: Codex strips *KEY*
+ *   variables from its shell, so the environment cannot carry it. For `import`
+ *   and `migrate` the agent is also a logged-in customer (see linkAccount).
  */
 export function createWorkspace(
   root: string,
@@ -74,12 +82,14 @@ export function createWorkspace(
   cfg: EvalConfig,
   files: string[],
   access: CliAccess,
-  secretKey?: string,
+  target?: ClerkTarget,
 ): Workspace {
   const ws: Workspace = {
     root, dir: join(root, "ws"), bin: join(root, "bin"), home: join(root, "home"), tmp: join(root, "tmp"),
-    calls: join(root, "clerk-calls.jsonl"), roundFile: join(root, "round"),
+    calls: join(root, "log", "clerk-calls.jsonl"), roundFile: join(root, "round"), clerkConfig: join(root, "clerk-config"),
   };
+  mkdirSync(join(root, "log"), { recursive: true });
+  mkdirSync(ws.clerkConfig, { recursive: true });
   mkdirSync(ws.dir, { recursive: true });
   mkdirSync(ws.bin, { recursive: true });
   mkdirSync(ws.tmp, { recursive: true });
@@ -92,13 +102,45 @@ export function createWorkspace(
     copyFileSync(join(homedir(), ".codex/auth.json"), join(ws.home, ".codex/auth.json"));
     chmodSync(join(ws.home, ".codex/auth.json"), 0o600);
   }
-  writeShim(ws, cfg.cli, access, secretKey);
+  const linked = target && (access === "import" || access === "migrate");
+  if (linked) {
+    linkAccount(ws, cfg.cli, target);
+    ws.broker = { dir: join(root, "log", "broker"), target, cli: cfg.cli };
+    mkdirSync(ws.broker.dir, { recursive: true });
+  }
+  writeShim(ws, cfg.cli, access, target, linked);
   setRound(ws, 0);
   return ws;
 }
 
+/**
+ * Makes the agent a customer who ran `clerk auth login` and `clerk link`: your
+ * login (the CLI keeps it in the macOS keychain, so a changed HOME doesn't hide
+ * it), and the workspace linked to the target app. A secret key alone gets the
+ * keyless view, where `config patch` can't change sign-in settings; a link gets
+ * the full configuration. The link lives in the run's own CLERK_CONFIG_DIR, so
+ * your linked projects are untouched.
+ */
+function linkAccount(ws: Workspace, cli: string, target: ClerkTarget) {
+  mkdirSync(ws.clerkConfig, { recursive: true });
+  const [cmd, ...args] = cliArgv(cli);
+  try {
+    execFileSync(cmd, [...args, "link", "--app", target.app], {
+      cwd: ws.dir,
+      env: { ...process.env, CLERK_CONFIG_DIR: ws.clerkConfig, CLERK_TELEMETRY_DISABLED: "1" },
+      stdio: "pipe",
+    });
+  } catch (e) {
+    throw new SetupError(`clerk link --app ${target.app} (${target.name}) failed, is your clerk login current? ${String((e as { stderr?: Buffer }).stderr ?? e).trim().slice(-300)}`);
+  }
+  const { profiles = {} } = JSON.parse(readFileSync(join(ws.clerkConfig, "config.json"), "utf8"));
+  const links = Object.values(profiles) as { appId?: string; instances?: { development?: string } }[];
+  if (!links.some((p) => p.appId === target.app && p.instances?.development === target.instance))
+    throw new SetupError(`clerk link did not link the workspace to ${target.name}'s development instance ${target.instance}`);
+}
+
 /** Resolved now, so a `cli` of `clerk` cannot find the shim itself on PATH. */
-function writeShim(ws: Workspace, cli: string, access: CliAccess, secretKey?: string) {
+function writeShim(ws: Workspace, cli: string, access: CliAccess, target?: ClerkTarget, linked?: boolean) {
   const argv = cliArgv(cli).map((a, i) =>
     i === 0 ? execFileSync("/bin/sh", ["-c", `command -v ${a}`], { encoding: "utf8" }).trim() : a,
   );
@@ -109,12 +151,25 @@ function writeShim(ws: Workspace, cli: string, access: CliAccess, secretKey?: st
     sources,
     "dry-run": `${sources} || ${dryRun}`,
     // Everything an import needs, including changing instance settings (which
-    // the skill only allows after the user's yes); never undo or export.
-    import: `${sources} || [[ "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1" == "doctor" ]]`,
+    // the skill only allows after the user's yes) and reading users back to
+    // check the import; never undo or export.
+    import: `${sources} || [[ "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1 $2" == "config schema" || "$1 $2" == "users list" || "$1" == "doctor" ]]`,
     // Everything a whole migration needs: export from the source, then import.
-    migrate: `${sources} || [[ "$1 $2" == "migrate export" || "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1" == "doctor" ]]`,
+    migrate: `${sources} || [[ "$1 $2" == "migrate export" || "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1 $2" == "config schema" || "$1 $2" == "users list" || "$1" == "doctor" ]]`,
   }[access];
-  const key = (access === "dry-run" || access === "import" || access === "migrate") && secretKey ? `export CLERK_SECRET_KEY='${secretKey}'` : "";
+  const key = (access === "dry-run" || access === "import" || access === "migrate") && target ? `export CLERK_SECRET_KEY='${target.secretKey}'` : "";
+  const account = linked ? `export CLERK_CONFIG_DIR='${ws.clerkConfig}'` : "";
+  // Your login reaches every app in the account; the agent gets only the target.
+  // ponytail: checks the first --app and --instance only; one call naming two is refused by the CLI anyway.
+  const pinned = account && target
+    ? `app_re=' --app[ =]([^ ]+) '; ins_re=' --instance[ =]([^ ]+) '
+if { [[ "$a" =~ $app_re ]] && [[ "\${BASH_REMATCH[1]}" != '${target.app}' ]]; } ||
+   { [[ "$a" =~ $ins_re ]] && [[ " dev development ${target.instance} " != *" \${BASH_REMATCH[1]} "* ]]; }; then
+  echo "clerk: this eval only opens ${target.app}'s development instance ${target.instance}" >&2
+  ALLOWED=false CODE=2 log "$@"
+  exit 2
+fi`
+    : "";
   // bash 3.2 (macOS /bin/bash): no $EPOCHREALTIME, so calls are ordered by the
   // question round the runner writes before each turn.
   const shim = `#!/bin/bash
@@ -132,14 +187,111 @@ if ! { ${allowed}; }; then
   ALLOWED=false CODE=2 log "$@"
   exit 2
 fi
+${pinned}
+${ws.broker ? brokerShim(ws.broker.dir) : ""}
 export CLERK_TELEMETRY_DISABLED=1
 ${key}
+${account}
 ${argv.map((a) => `'${a}'`).join(" ")} "$@"
 CODE=$?
 ALLOWED=true log "$@"
 exit $CODE
 `;
   writeFileSync(join(ws.bin, "clerk"), shim, { mode: 0o755 });
+}
+
+/**
+ * Calls that need your `clerk auth login`. The login is in the macOS keychain,
+ * which Codex's sandbox can't reach, so the shim hands these to the harness
+ * (outside any sandbox) for both agents alike, and prints what comes back.
+ */
+const brokered = (args: string[]) => ["config pull", "config patch", "config schema"].includes(args.slice(0, 2).join(" ")) || args[0] === "doctor";
+
+/**
+ * The shim's half: write the request, wait for the harness's answer. NUL-separated args keep quoting intact.
+ * ponytail: stdin isn't passed on, so `config patch` must take its JSON as an argument or a file.
+ */
+const brokerShim = (dir: string) => `if [[ "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1 $2" == "config schema" || "$1" == "doctor" ]]; then
+  req='${dir}'/"$$-$RANDOM"
+  printf '%s' "$PWD" > "$req.cwd"
+  printf '%s\\0' "$@" > "$req.tmp" && mv "$req.tmp" "$req.args"
+  for ((i = 0; i < 1200; i++)); do [[ -f "$req.code" ]] && break; sleep 0.1; done
+  if [[ -f "$req.code" ]]; then
+    cat "$req.out"; cat "$req.err" >&2; CODE=$(cat "$req.code")
+  else
+    echo "clerk: no answer from the eval harness in 120s" >&2; CODE=2
+  fi
+  rm -f "$req".*
+  ALLOWED=true log "$@"
+  exit $CODE
+fi`;
+
+/** Whether `dir` is `root` or below it. Real paths: macOS's temp folder is /var to one process and /private/var to another. */
+const inside = (root: string, dir: string) => {
+  try {
+    const rel = relative(realpathSync(root), realpathSync(dir));
+    return !rel.startsWith("..") && !isAbsolute(rel);
+  } catch {
+    return false;
+  }
+};
+
+/** The value after `flag` (`--app x` or `--app=x`), if given. */
+const flagValue = (args: string[], flag: string) => {
+  const i = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
+  return i < 0 ? undefined : args[i].includes("=") ? args[i].slice(flag.length + 1) : args[i + 1];
+};
+
+/**
+ * The harness's half of the broker: while a turn runs, runs each request the
+ * shim leaves with your login and the workspace's link, and writes back stdout,
+ * stderr and the exit code (the code last, which is what the shim waits for).
+ * The request folder is writable from the sandbox, so the shim's checks are
+ * repeated here: only brokered commands, only the target, only in the workspace.
+ *
+ * @returns Stops serving once every request already picked up has been answered.
+ */
+export function serveBroker(ws: Workspace): () => Promise<void> {
+  const b = ws.broker;
+  if (!b) return async () => {};
+  const pending = new Set<Promise<void>>();
+  const seen = new Set<string>();
+  const answer = async (id: string) => {
+    const base = join(b.dir, id);
+    const args = readFileSync(`${base}.args`, "utf8").split("\0").slice(0, -1);
+    const cwd = existsSync(`${base}.cwd`) ? readFileSync(`${base}.cwd`, "utf8") : ws.dir;
+    const app = flagValue(args, "--app");
+    const instance = flagValue(args, "--instance");
+    const refusal =
+      !brokered(args) ? `"clerk ${args.join(" ")}" is not run by the eval harness`
+      : !inside(ws.dir, cwd) ? "clerk calls must run inside the workspace"
+      : (app && app !== b.target.app) || (instance && !["dev", "development", b.target.instance].includes(instance))
+        ? `this eval only opens ${b.target.app}'s development instance ${b.target.instance}`
+        : undefined;
+    const [cmd, ...pre] = cliArgv(b.cli);
+    const r = refusal
+      ? { code: 2, stdout: "", stderr: `clerk: ${refusal}\n` }
+      : await run(cmd, [...pre, ...args], {
+          ...process.env, CLERK_CONFIG_DIR: ws.clerkConfig, CLERK_SECRET_KEY: b.target.secretKey, CLERK_TELEMETRY_DISABLED: "1",
+        }, { cwd, timeoutMs: 110_000 }).catch((e: Error) => ({ code: 2, stdout: "", stderr: `clerk: ${e.message}\n` }));
+    writeFileSync(`${base}.out`, r.stdout);
+    writeFileSync(`${base}.err`, r.stderr);
+    writeFileSync(`${base}.code.tmp`, String(r.code));
+    renameSync(`${base}.code.tmp`, `${base}.code`);
+  };
+  const timer = setInterval(() => {
+    for (const f of readdirSync(b.dir)) {
+      const id = f.endsWith(".args") ? f.slice(0, -5) : undefined;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const p = answer(id).catch(() => {}).finally(() => pending.delete(p));
+      pending.add(p);
+    }
+  }, 100);
+  return async () => {
+    clearInterval(timer);
+    await Promise.all(pending);
+  };
 }
 
 /** One line per `clerk` call the agent made, from the shim's log. */
@@ -208,7 +360,8 @@ export async function runTurn(
       ...(opts.system ? ["--append-system-prompt", opts.system] : []),
       ...(opts.resume ? ["--resume", opts.resume] : []),
     ];
-    const r = await run("claude", args, env, { cwd: ws.dir, timeoutMs });
+    const stopBroker = serveBroker(ws);
+    const r = await run("claude", args, env, { cwd: ws.dir, timeoutMs }).finally(stopBroker);
     const events = r.stdout.split("\n").filter(Boolean).map((l) => {
       try {
         return JSON.parse(l);
@@ -245,6 +398,9 @@ export async function runTurn(
     "-c", "allow_login_shell=false",
     // The shared /tmp carried one run's scratch scripts into later runs; TMPDIR (ws.tmp) stays writable.
     "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+    // The shim runs inside the sandbox: it appends to the call log, and the CLI
+    // writes its config. Neither is under the workspace or TMPDIR.
+    "-c", `sandbox_workspace_write.writable_roots=${JSON.stringify([dirname(ws.calls), ws.clerkConfig])}`,
     // The dry run and import call Clerk; the workspace-write sandbox blocks the network otherwise.
     "-c", `sandbox_workspace_write.network_access=${opts.access !== "none" && opts.access !== "sources"}`,
     ...(opts.system ? ["-c", `developer_instructions=${JSON.stringify(opts.system)}`] : []),
@@ -253,7 +409,8 @@ export async function runTurn(
   ];
   const args = opts.resume ? ["exec", "resume", ...flags, opts.resume, prompt] : ["exec", ...flags, prompt];
   await syncCodexLogin(ws, "in");
-  const r = await run("codex", args, { ...env, HOME: ws.home, CODEX_HOME: join(ws.home, ".codex") }, { cwd: ws.dir, timeoutMs });
+  const stopBroker = serveBroker(ws);
+  const r = await run("codex", args, { ...env, HOME: ws.home, CODEX_HOME: join(ws.home, ".codex") }, { cwd: ws.dir, timeoutMs }).finally(stopBroker);
   await syncCodexLogin(ws, "out");
   const thread = r.stdout.split("\n").map((l) => parseJson<{ type?: string; thread_id?: string }>(l)).find((e) => e?.type === "thread.started");
   return {

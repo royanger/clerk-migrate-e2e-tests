@@ -157,7 +157,7 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
       const clerk = clerkRun({ cli: cfg.cli, secretKey: claim.target.secretKey, log: join(batchDir, "clerk.log") });
       await clerk.patchConfig(targetArgs(claim.target), withBaseline(configForUsers(key.users)));
     }
-    const ws = createWorkspace(root, agent, cfg, [resolve("data/custom-sources", exportName)], access, claim.target.secretKey);
+    const ws = createWorkspace(root, agent, cfg, [resolve("data/custom-sources", exportName)], access, claim.target);
 
     const vars = { file: exportName, provider, cliAccess: ACCESS_LINE[access] };
     const s = await runSession({

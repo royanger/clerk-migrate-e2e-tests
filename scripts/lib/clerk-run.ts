@@ -4,7 +4,7 @@
  * and test-custom-source.ts.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createClerkClient, type User } from "@clerk/backend";
@@ -24,7 +24,10 @@ export const cliArgv = (cli: string) => (/\.[jt]s$/.test(cli) ? ["bun", cli] : [
 export function pinCli(cli: string, dir: string): string {
   if (!cli.endsWith(".ts")) return cli;
   execFileSync("bun", ["build", cli, "--target=bun", "--external", "@napi-rs/keyring", "--outdir", dir], { stdio: "ignore" });
-  process.env.NODE_PATH = [join(dirname(cli), "..", "node_modules"), process.env.NODE_PATH].filter(Boolean).join(":");
+  // The keyring (your `clerk auth login`) stays outside the bundle, so it has to be findable: a workspace
+  // install keeps it in packages/cli-core/node_modules or hoists it to the checkout's root, so try each folder up.
+  const up = (d: string): string[] => (dirname(d) === d ? [] : [join(d, "node_modules"), ...up(dirname(d))]);
+  process.env.NODE_PATH = [...up(dirname(dirname(cli))).filter((d) => existsSync(d)), process.env.NODE_PATH].filter(Boolean).join(":");
   return join(dir, "cli.js");
 }
 
