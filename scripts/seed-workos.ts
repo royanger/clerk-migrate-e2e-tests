@@ -6,13 +6,16 @@
  * backoff and honours Retry-After, and the pool retries on top of that.
  *
  * WorkOS User Management has no phone or username identifier — email is the
- * only one. Phone-only users therefore get the same <digits>@phone.local
- * placeholder the other apps use, and both the real number and the username
- * ride along in `metadata` so the migration data is still there.
+ * only one, and a user without one can't exist. Phone-only users are left out.
+ * Phones and usernames go in `metadata` under the keys WorkOS's own migration
+ * tool (@workos/migrations) writes, as an app that moved to WorkOS would have
+ * them: half the phone users came "from Firebase" (`phone_number`), the other
+ * half "from Clerk" (`primary_phone_number`, plus `verified_phone_numbers` or
+ * `unverified_phone_numbers`). Usernames go in `username`.
  *
  * The migration-test variations (scripts/variations/workos.ts) also use:
- *   - `metadata.user` — replaces the default metadata outright (seed_id, phone,
- *     username), so a variation can seed empty or at-the-limit metadata.
+ *   - `metadata.user` — replaces the default metadata outright (seed_id, phone
+ *     and username keys), so a variation can seed empty or at-the-limit metadata.
  *     WorkOS metadata is string → string, at most 10 keys.
  *   - `sourceId` — the WorkOS `external_id` (default: the seed id).
  *   - `orgs` — memberships, in organizations named as given (created once).
@@ -25,19 +28,25 @@
  */
 import bcrypt from "bcryptjs";
 import { WorkOS } from "@workos-inc/node";
-import {
-  loadUsers,
-  placeholderEmail,
-  pool,
-  progressBar,
-  reportFailures,
-  type SeedUser,
-} from "./lib/users";
+import { loadUsers, pool, progressBar, reportFailures, type SeedUser } from "./lib/users";
 
 const workos = new WorkOS(process.env.WORKOS_API_KEY!, {
   clientId: process.env.WORKOS_CLIENT_ID,
 });
-const { seedPassword, users } = loadUsers();
+const { seedPassword, users: all } = loadUsers();
+const users = all.filter((u) => u.email);
+
+/** Phone users alternate between the Firebase and the Clerk metadata shape. */
+const fromFirebase = new Set(users.filter((u) => u.phone).filter((_, i) => i % 2 === 0));
+const phoneMetadata = (u: SeedUser): Record<string, string> =>
+  !u.phone
+    ? {}
+    : fromFirebase.has(u)
+      ? { phone_number: u.phone }
+      : {
+          primary_phone_number: u.phone,
+          [u.phoneVerified ? "verified_phone_numbers" : "unverified_phone_numbers"]: u.phone,
+        };
 
 /*
  * Every user shares one password, so one bcrypt hash is computed and reused.
@@ -63,7 +72,7 @@ const orgId = (name: string) => {
 
 async function createUser(u: SeedUser) {
   const user = await workos.userManagement.createUser({
-    email: u.email ?? placeholderEmail(u.phone!),
+    email: u.email!,
     emailVerified: u.emailVerified,
     externalId: u.sourceId ?? u.id,
     firstName: u.firstName ?? undefined,
@@ -73,7 +82,7 @@ async function createUser(u: SeedUser) {
       ? stringify(u.metadata.user)
       : {
           seed_id: u.id,
-          ...(u.phone ? { phone: u.phone } : {}),
+          ...phoneMetadata(u),
           ...(u.username ? { username: u.username } : {}),
         },
   });
@@ -93,11 +102,10 @@ async function createUser(u: SeedUser) {
   if (u.mfa) await workos.multiFactorAuth.createUserAuthFactor({ userId: user.id, type: "totp" });
 }
 
-console.log(`Seeding ${users.length} users into WorkOS…`);
+console.log(`Seeding ${users.length} users into WorkOS (${all.length - users.length} phone-only left out)…`);
 
 const failures = await pool(users, 4, createUser, progressBar("created"));
 reportFailures(failures);
 
 console.log(`\nSeed password: ${seedPassword}`);
-console.log("Phone-only users were imported as <digits>@phone.local.");
 console.log("Phone numbers and usernames are in user metadata — WorkOS has no identifier for either.");

@@ -42,12 +42,16 @@ export const exportFile = (provider: string) => `data/provider-exports/${provide
  */
 const UNSUPPORTED_FORMATS: Record<string, string[]> = { firebase: ["argon2id"] };
 
+/** Providers where every user has an email, so phone-only users can't exist. */
+const EMAIL_REQUIRED = ["workos"];
+
 /** data/users-eval.json, adjusted for what `provider` can store. */
 export function usersFor(provider: string, dir: string): string {
-  const drop = UNSUPPORTED_FORMATS[provider];
-  if (!drop) return "data/users-eval.json";
+  const drop = UNSUPPORTED_FORMATS[provider] ?? [];
+  if (!drop.length && !EMAIL_REQUIRED.includes(provider)) return "data/users-eval.json";
   const seed = JSON.parse(readFileSync("data/users-eval.json", "utf8"));
   for (const u of seed.users) if (drop.includes(u.passwordFormat)) delete u.passwordFormat;
+  if (EMAIL_REQUIRED.includes(provider)) seed.users = seed.users.filter((u: { email: string | null }) => u.email);
   const file = join(dir, `users-${provider}.json`);
   writeFileSync(file, JSON.stringify(seed));
   return file;

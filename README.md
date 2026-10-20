@@ -824,7 +824,7 @@ The JSON knows nothing about any provider. Each seeder does its own mapping.
 | Provider | Transformation |
 |---|---|
 | Auth0 | phone-only users get `<digits>@phone.local`; username and phone go on the real fields when the connection supports them, and into `user_metadata` otherwise; one shared bcrypt hash |
-| WorkOS | the same placeholder email; phone and username into `metadata`; one shared bcrypt hash |
+| WorkOS | phone-only users left out (WorkOS needs an email); phones into `metadata` under the keys WorkOS's own migration tool writes, alternating `phone_number` (from Firebase) and `primary_phone_number` + `verified_phone_numbers` / `unverified_phone_numbers` (from Clerk); usernames into `metadata.username`; one shared bcrypt hash |
 | Firebase | no username field, so username and names go into custom claims |
 | Supabase | username and names into `user_metadata`; users created confirmed |
 | Better Auth | real scrypt hashes, written as `salt:hash` credential accounts |
