@@ -30,6 +30,8 @@ export type Grade = {
 type Check = { field: string; ok: boolean; reason?: string; example?: string; note?: boolean };
 
 const META = { publicMetadata: "public", privateMetadata: "private", unsafeMetadata: "unsafe" } as const;
+/** Private metadata keys the import adds on its own, not from the source data. */
+const CLI_KEYS = new Set(["clerkMigrateRun", "clerkExternalId"]);
 type MetaField = keyof typeof META;
 
 export function letter(accuracy: number): string {
@@ -151,6 +153,9 @@ function checksFor(
   for (const want of fields) {
     for (const [k, v] of Object.entries(e[want])) {
       expectedKeys.add(k);
+      // A golden key holds its own import's run ID; every import writes a new one. clerkExternalId is the
+      // source's own ID, the same every time, so it is still compared.
+      if (k === "clerkMigrateRun") continue;
       const where = fields.filter((f) => isDeepStrictEqual(held(f)[k], v));
       const there = fields.find((f) => k in held(f));
       const reason = where.length ? "wrong metadata field" : there ? "wrong value" : "missing";
@@ -170,6 +175,9 @@ function checksFor(
   }
   for (const f of fields) {
     for (const k of Object.keys(held(f))) {
+      // The CLI writes these itself: the import's run ID on every user, and a Clerk source's own external ID.
+      // ponytail: skipped, not checked against the run ID; compare them if the CLI ever gets them wrong.
+      if (f === "privateMetadata" && CLI_KEYS.has(k)) continue;
       if (!expectedKeys.has(k)) checks.push({ field: "metadata", ok: false, reason: "unexpected key", example: `${META[f]}.${k} = ${show(held(f)[k])}`, note: true });
     }
   }
