@@ -24,6 +24,14 @@ export type Answer = { topic: string; tag?: string; text: string };
  */
 export const LATE = "late";
 
+/**
+ * `## always`: what the customer said at the terminal, saved without a topic.
+ * Never hides an all.md answer. A question the set has no answer for gets these
+ * instead of the terminal, once per run. Every `## always` heading in a file adds
+ * to the last.
+ */
+export const ALWAYS = "always";
+
 export type AnswerSet = {
   name: string;
   /** The folder of sets this one lives in. */
@@ -59,7 +67,9 @@ export function parseAnswers(md: string): Map<string, Answer> {
     const [heading, ...body] = part.split("\n");
     const m = heading.trim().match(/^([\w-]+)(?:\s*\(([^)]*)\))?\s*$/);
     if (!m) throw new Error(`Bad answer heading "## ${heading.trim()}": expected "## <topic>" or "## <topic> (<tag>)"`);
-    out.set(m[1], { topic: m[1], tag: m[2]?.trim() || undefined, text: body.join("\n").trim() });
+    const text = body.join("\n").trim();
+    const earlier = m[1] === ALWAYS ? out.get(ALWAYS)?.text : undefined;
+    out.set(m[1], { topic: m[1], tag: m[2]?.trim() || undefined, text: earlier ? `${earlier}\n\n${text}` : text });
   }
   return out;
 }
@@ -75,7 +85,7 @@ export function loadSet(name: string, folder: string): AnswerSet {
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
     const parsed = parseAnswers(readFileSync(join(dir, file), "utf8"));
     for (const topic of parsed.keys()) {
-      if (!topics[topic] && topic !== LATE) throw new Error(`${dir}/${file}: topic "${topic}" is not in topics.json`);
+      if (!topics[topic] && topic !== LATE && topic !== ALWAYS) throw new Error(`${dir}/${file}: topic "${topic}" is not in topics.json`);
     }
     answers.set(file.replace(/\.md$/, ""), parsed);
   }
@@ -117,18 +127,15 @@ export function lookup(set: AnswerSet, provider: string, topic: string): Answer 
 }
 
 /**
- * Adds an answer typed during an eval to the set, under each of `topics`,
- * tagged with the date, and bumps the set's version once. Replaces nothing: if
- * a topic already has an answer, the new heading is added below it and the
- * first one keeps winning, so check before saving.
+ * Adds an answer typed during an eval to `provider`'s file as `## always`,
+ * tagged with the date, and bumps the set's version. No topic: it adds to the
+ * earlier ones and never hides an all.md answer (see ALWAYS).
  */
-export function saveAnswer(set: AnswerSet, provider: string, topics: string[], text: string, date = new Date()) {
+export function saveAnswer(set: AnswerSet, provider: string, text: string, date = new Date()) {
   const dir = join(set.dir, set.name);
   const file = join(dir, `${provider}.md`);
-  for (const topic of topics) {
-    const sep = existsSync(file) && readFileSync(file, "utf8").trim() ? "\n" : "";
-    appendFileSync(file, `${sep}## ${topic} (added ${date.toISOString().slice(0, 10)})\n${text.trim()}\n`);
-  }
+  const sep = existsSync(file) && readFileSync(file, "utf8").trim() ? "\n" : "";
+  appendFileSync(file, `${sep}## ${ALWAYS} (added ${date.toISOString().slice(0, 10)})\n${text.trim()}\n`);
   const metaFile = join(dir, "set.json");
   const meta = JSON.parse(readFileSync(metaFile, "utf8"));
   meta.version = Number(meta.version ?? 1) + 1;

@@ -6,7 +6,7 @@
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { runTurn, setRound, type CliAccess, type TurnOutput, type Workspace } from "./agents";
-import { LATE, loadSet, lookup, resolveEnv, saveAnswer, type AnswerSet } from "./answers";
+import { ALWAYS, LATE, loadSet, lookup, resolveEnv, saveAnswer, type AnswerSet } from "./answers";
 import { classify } from "./classify";
 import type { AgentName, EvalConfig } from "./config";
 
@@ -40,6 +40,9 @@ async function ask(prompt: string): Promise<string> {
  */
 export function answerer(initial: AnswerSet, topics: Record<string, string>) {
   let set = initial;
+  // A run gets its saved terminal answers once; asked again, it goes to the terminal, so a
+  // saved answer that doesn't fit the question can't loop the run.
+  let savedSent = false;
   return {
     get set() {
       return set;
@@ -57,6 +60,17 @@ export function answerer(initial: AnswerSet, topics: Record<string, string>) {
           });
           continue;
         }
+        // "CONTEXT (no answer needed): …" with the real questions in other items: nothing to answer.
+        // ponytail: no "?" means no question; an imperative ask ("Tell me which instance.") also gets "Noted."
+        if (!question.includes("?")) {
+          out.push({ round, question, topics: matched[i], by: "set", answer: "Noted.", tags: ["context"] });
+          continue;
+        }
+        const saved = lookup(set, provider, ALWAYS);
+        if (saved && !savedSent) {
+          out.push({ round, question, topics: matched[i], by: "set", answer: saved.text, tags: [ALWAYS] });
+          continue;
+        }
         if (set.fallback !== "ask-human") {
           out.push({ round, question, topics: matched[i], by: "fallback", answer: set.fallback, tags: [] });
           continue;
@@ -72,25 +86,12 @@ export function answerer(initial: AnswerSet, topics: Record<string, string>) {
 
         const save = (await ask(`Save to set "${set.name}" for ${provider}? [y/N] `)).trim().toLowerCase();
         if (save === "y" || save === "yes") {
-          // One answer often covers several topics ("yes to both"): Enter saves it under all of them.
-          const suggested = matched[i].join(",");
-          let chosen = matched[i].length === 1 ? matched[i] : [];
-          while (!chosen.length || chosen.some((t) => !(t in topics))) {
-            const raw = (await ask(
-              `Topic(s), comma-separated${suggested ? ` [Enter = ${suggested}]` : ""} (${Object.keys(topics).join(", ")}): `,
-            )).trim();
-            chosen = (raw || suggested).split(",").map((t) => t.trim()).filter(Boolean);
-            const unknown = chosen.filter((t) => !(t in topics));
-            if (unknown.length) console.log(`Not a topic: ${unknown.join(", ")}`);
-          }
-          for (const t of chosen.filter((t) => lookup(set, provider, t))) {
-            console.log(`${provider} already answers ${t}; the new answer is added below it and the first one still wins.`);
-          }
-          const version = saveAnswer(set, provider, chosen, text);
+          const version = saveAnswer(set, provider, text);
           set = loadSet(set.name, set.dir);
-          console.log(`Saved as ${chosen.join(", ")}; "${set.name}" is now v${version}.`);
+          console.log(`Saved for ${provider}: later questions the set can't answer get it. "${set.name}" is now v${version}.`);
         }
       }
+      if (out.some((q) => q.tags.includes(ALWAYS))) savedSent = true;
       return out;
     },
   };

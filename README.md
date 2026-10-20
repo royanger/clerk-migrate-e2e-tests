@@ -535,9 +535,11 @@ Three evals, each run with Claude Code and Codex:
    output and exit code. Both agents go through it.
 4. **Questions.** The agent ends each turn with questions, a finished job, or a
    blocker. A small model files each question under a topic, and the answer set
-   replies. A question the set doesn't cover goes to its `fallback`: a fixed
-   reply, or you in the terminal. Save your answer and the set's version goes
-   up.
+   replies. An item with no `?` is context, not a question, and gets "Noted."
+   A question the set doesn't cover gets your saved answers for that provider
+   (once per run), then its `fallback`: a fixed reply, or you in the terminal.
+   Save your answer and it goes into `## always` for that provider; the set's
+   version goes up.
 5. **Stalls.** The runner stops a turn still going after 15 minutes and resumes
    the session once. A second stall ends the run as `timeout`.
 
