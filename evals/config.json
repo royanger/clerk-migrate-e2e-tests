@@ -1,6 +1,6 @@
 {
-  "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli/packages/cli-core/src/cli.ts",
-  "skillSource": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/skills/skills/core/clerk-migrate",
+  "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli-slice-6/packages/cli-core/src/cli.ts",
+  "skillSource": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/skills/skills/clerk-migrate/",
   "prompts": "evals/prompts",
   "agents": {
     "claude": {
