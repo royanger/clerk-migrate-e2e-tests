@@ -8,5 +8,8 @@
   "passwords": "Users arriving without passwords, or with passwords Clerk cannot verify, who will need to reset them.",
   "social": "Social or OAuth sign-ins, which are not carried over.",
   "cleanup": "Deleting the run folders or export files the import leaves behind.",
-  "summary": "Confirming the agent's summary of what will be imported and what will not carry over."
+  "summary": "Confirming the agent's summary of what will be imported and what will not carry over, including a long plan or status update that ends with a question.",
+  "names": "A name field that holds something other than a person's name, such as an email, a phone number or a username: keep it, blank it, or move it.",
+  "verification": "Whether emails or phone numbers the export does not mark as verified are imported as verified, unverified, or reserved (--reserve-unverified).",
+  "metadata": "Where the export's metadata or extra fields go in Clerk (public, private or unsafe metadata), or whether to turn any of them into usernames or phone numbers."
 }

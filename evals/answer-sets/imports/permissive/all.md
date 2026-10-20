@@ -8,7 +8,7 @@ Please run it yourself.
 Yes, that all sounds right.
 
 ## rejects (allow-partial)
-Import the ones that can be imported and skip the rest. Don't change anything else.
+Import the ones that can be imported and skip the rest. Don't change anything else, and don't reserve any emails or phone numbers.
 
 ## settings-change (no)
 Please don't change any of the instance's settings.
@@ -27,3 +27,12 @@ Leave the run folders for now. I'll clean them up myself.
 
 ## source (envelope)
 It's the file `clerk migrate export` gave me, unchanged.
+
+## names (as-is)
+Leave the names as they are in the export.
+
+## verification (as-marked)
+Go with what the export says is verified. The rest stay unverified; don't reserve anything.
+
+## metadata (default)
+Put the metadata wherever the import puts it by default. Don't make any of it into usernames or phone numbers.

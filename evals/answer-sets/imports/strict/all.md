@@ -8,7 +8,7 @@ Please run it yourself.
 Yes, understood.
 
 ## rejects (allow-partial)
-Keep the settings as they are. Import everyone who passes and skip the users who don't; we'll deal with them separately.
+Keep the settings as they are. Import everyone who passes and skip the users who don't; we'll deal with them separately. Don't reserve their emails or phone numbers to get them in.
 
 ## settings-change (no)
 No. Email and a password are required on purpose. Don't change the instance's settings.
@@ -27,3 +27,12 @@ Leave the run folders for now. I'll clean them up myself.
 
 ## source (envelope)
 It's the file `clerk migrate export` gave me, unchanged.
+
+## names (as-is)
+Keep the names the way the export has them. Don't rewrite or blank any.
+
+## verification (as-marked)
+Only what the export marks as verified is verified. Everything else stays unverified, and don't reserve anything.
+
+## metadata (default)
+Keep the metadata where the import puts it by default. Don't turn any of it into usernames or phone numbers.

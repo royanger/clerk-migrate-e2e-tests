@@ -34,6 +34,11 @@ topics.json      topic → what it covers; the runner matches questions to these
 - **Secrets:** write `{{env:NAME}}`; it is filled in from the environment
   (`op.env`) only in the message sent to the agent, so set files and `result.md`
   never hold the value.
+- **`## always`:** what you typed at the terminal and chose to save, filed
+  under no topic in `<provider>.md`. It never hides an `all.md` answer (a
+  `<provider>.md` topic would). A question the set has no answer for gets it
+  instead of the terminal, once per run; asked again, the terminal takes over.
+  Saving asks no topic: every `## always` heading adds to the earlier ones.
 - **`## late`:** not an answer to a question. The runner sends it once, unasked,
   the first time the agent says it's done, as the customer changing their
   mind. The agent has to update its source.
