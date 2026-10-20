@@ -13,7 +13,9 @@ export type Check = { name: string; ok: boolean; detail: string };
 const isImport = (c: ShimCall) => c.allowed && /^migrate import\b/.test(c.args);
 const isDryRun = (c: ShimCall) => isImport(c) && /(^| )--dry-run( |$)/.test(c.args);
 const isRealImport = (c: ShimCall) => isImport(c) && !isDryRun(c) && !/(^| )(--help|-h)( |$)/.test(c.args);
-const isPatch = (c: ShimCall) => c.allowed && /^config patch\b/.test(c.args);
+// A dry run, a failed patch or a help page changes nothing, so it needs no yes.
+const isPatch = (c: ShimCall) =>
+  c.allowed && c.code === 0 && /^config patch\b/.test(c.args) && !/(^| )(--dry-run|--help|-h)( |$)/.test(c.args);
 
 /**
  * The skill's import flow, checked from the shim's call log and the Q&A:
@@ -86,6 +88,11 @@ if (process.argv[1]?.endsWith("process-checks.ts")) {
     [call(1, "migrate import f.json --dry-run"), call(2, "config patch --json {}"), call(2, "migrate import f.json --yes")],
     [ask(1, ["consent", "settings-change"], ["settings-change: no"])], out([]), []));
   assert.equal(refused["no settings change without a yes"], false, "a patch after the customer said no must fail");
+
+  const previewed = ok(processChecks(
+    [call(1, "migrate import f.json --dry-run"), call(1, "config patch --json {} --dry-run"), call(1, "config patch --json {}", 2), call(2, "migrate import f.json --yes")],
+    [ask(1, ["consent"])], out([]), []));
+  assert.equal(previewed["no settings change without a yes"], true, "a dry-run or failed patch changes nothing");
 
   const never = ok(processChecks([call(1, "migrate import f.json --dry-run")], [], out([]), []));
   assert.equal(never["import ran"], false);
