@@ -44,7 +44,8 @@ line(cli.code === 0, "cli", `${cfg.cli}${cli.code === 0 ? "" : ` → exit ${cli.
 // ── 3. the saved skill ──
 const saved = hashTree(SKILL_DIR);
 if (!existsSync(join(SKILL_DIR, "SKILL.md"))) line(false, "skill", `no ${SKILL_DIR}/SKILL.md: run pnpm eval:sync-skill`);
-else if (!existsSync(cfg.skillSource)) line("warn", "skill", `${saved} · skillSource ${cfg.skillSource} not found`);
+// A missing source fails: the batch would test the saved copy, which nothing keeps current.
+else if (!existsSync(cfg.skillSource)) line(false, "skill", `${saved} · skillSource ${cfg.skillSource} not found: fix it in evals/config.json`);
 else {
   const source = hashTree(cfg.skillSource);
   line(source === saved ? true : "warn", "skill", source === saved ? `${saved} · in sync with skillSource` : `${saved} · skillSource is ${source}: run pnpm eval:sync-skill to update`);

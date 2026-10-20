@@ -48,6 +48,22 @@ export function readTree(dir: string): Map<string, Buffer> {
 }
 
 /** A short content hash of a directory, so a result names the exact skill it tested. */
+/**
+ * The saved skill's hash, checked against `skillSource` before a batch. A
+ * missing source stops it: the batch would test a copy nothing keeps current.
+ * A saved copy that differs only warns, since that can be a proposal under test.
+ */
+export function checkedSkillHash(cfg: EvalConfig): string {
+  const saved = hashTree(SKILL_DIR);
+  if (!existsSync(cfg.skillSource)) {
+    console.error(`skillSource ${cfg.skillSource} not found: fix it in evals/config.json`);
+    process.exit(2);
+  }
+  if (hashTree(cfg.skillSource) !== saved)
+    console.warn(`⚠ ${SKILL_DIR} (${saved}) differs from skillSource: run pnpm eval:sync-skill to test the current skill`);
+  return saved;
+}
+
 export function hashTree(dir: string): string {
   const h = createHash("sha256");
   for (const [path, body] of readTree(dir)) h.update(path).update("\0").update(body).update("\0");

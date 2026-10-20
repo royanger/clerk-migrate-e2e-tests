@@ -34,7 +34,7 @@ import { claudeAccount, codexAccount, CLI_ACCESS, createWorkspace, type CliAcces
 import { loadSet, loadTopics, setsDir } from "./answers";
 import { loadPrompts } from "./prompts";
 import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type QA } from "./session";
-import { AGENTS, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
+import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 
 const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun", "frostline", "nimbus"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
 /** Question rounds before the run is called stuck. */
@@ -291,7 +291,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
 
 // ── main ──
 
-const skillHash = hashTree(SKILL_DIR);
+const skillHash = checkedSkillHash(cfg);
 const accounts = Object.fromEntries(
   await Promise.all(agents.map(async (a) => [a, await (a === "claude" ? claudeAccount() : codexAccount())] as const)),
 );

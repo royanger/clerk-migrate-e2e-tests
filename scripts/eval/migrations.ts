@@ -42,7 +42,7 @@ import { clerkLock, schedule } from "../lib/lock";
 import { run } from "../lib/run";
 import { claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
 import { envRefs, listSets, loadSet, loadTopics, setsDir, type AnswerSet } from "./answers";
-import { AGENTS, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
+import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 import { agentFiles, CLI_SOURCE, exportChecks, type ExportRun } from "./export-checks";
 import { goldenFile, settingsOf, runUsers, type GoldenKey } from "./golden";
 import { processChecks, type Check } from "./process-checks";
@@ -388,7 +388,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
 
 // ── main ──
 
-const skillHash = hashTree(SKILL_DIR);
+const skillHash = checkedSkillHash(cfg);
 const accounts = Object.fromEntries(await Promise.all(agents.map(async (a) => [a, await (a === "claude" ? claudeAccount() : codexAccount())] as const)));
 for (const a of agents) {
   if (!accounts[a].ok) {

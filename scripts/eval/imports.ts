@@ -32,7 +32,7 @@ import { grade, section, type Grade } from "../lib/grade";
 import { claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
 import { processChecks, type Check } from "./process-checks";
 import { envRefs, listSets, loadSet, loadTopics, setsDir, type AnswerSet } from "./answers";
-import { AGENTS, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
+import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 import { goldenFile, settingsOf, runUsers, sha256, type GoldenKey } from "./golden";
 import { exportFile, PROVIDER_EXPORTS, PROVIDER_NAMES } from "./provider-exports";
 import { loadPrompts } from "./prompts";
@@ -264,7 +264,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
 
 // ── main ──
 
-const skillHash = hashTree(SKILL_DIR);
+const skillHash = checkedSkillHash(cfg);
 const accounts = Object.fromEntries(await Promise.all(agents.map(async (a) => [a, await (a === "claude" ? claudeAccount() : codexAccount())] as const)));
 for (const a of agents) {
   if (!accounts[a].ok) {
