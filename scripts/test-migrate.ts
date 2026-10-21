@@ -39,7 +39,7 @@ import { withRetry, type SeedUser } from "./lib/users";
 import { flag, value } from "./lib/args";
 import { clerkLock, lockProviders } from "./lib/lock";
 import { resolveTarget, targetSpecs } from "./lib/targets";
-import { SOURCE, SOURCE_SECRET_KEY } from "./lib/clerk-source";
+import { deleteAllUsers, SOURCE, SOURCE_SECRET_KEY } from "./lib/clerk-source";
 
 const CLI = resolve(value("cli")?.replace(/^~/, homedir()) ?? DEFAULT_CLI);
 // The variations' own CLI calls (lib/clerk-source.ts) use the same build.
@@ -407,7 +407,12 @@ async function runOne(v: Variation, dest: DestId): Promise<Row> {
         await new Promise((r) => setTimeout(r, 15_000 * wait));
         undo = await cli(undoArgs);
       }
-      if (undo.code !== 0) row.notes.push(`undo exited ${undo.code}`);
+      if (undo.code !== 0) {
+        row.notes.push(`undo exited ${undo.code}`);
+        // The guard found the instance empty, so all it holds is this run's.
+        // Empty it, or every later variation stops on the guard.
+        await deleteAllUsers(clerk).catch((e) => row.notes.push(`could not empty the instance after the failed undo: ${String(e).slice(0, 200)}`));
+      }
     }
     for (const id of preCreated) await withRetry(() => clerk.users.deleteUser(id), 8).catch(() => row.notes.push(`could not delete pre-created ${id}`));
     if (importRun || preCreated.length) {
