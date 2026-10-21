@@ -119,11 +119,13 @@ export const variations: Variation[] = [
     expect: (clerk, seeded, dest, users) => {
       const issues = check()(clerk, seeded, dest, users);
       if (dest !== "D1") return issues;
-      const keys = (u: User) => Object.keys(u.unsafeMetadata ?? {});
-      const full = users.filter((u) => keys(u).length === 10 && Object.values(u.unsafeMetadata).every((v) => String(v).length === 600));
-      const empty = users.filter((u) => keys(u).length === 0);
-      if (full.length !== 2) issues.push(`at-limit metadata → unsafe metadata: ${full.length}/2 intact`);
-      if (empty.length !== 2) issues.push(`empty metadata → no unsafe metadata: ${empty.length}/2`);
+      // WorkOS metadata lands in private metadata, next to the keys the import writes itself.
+      const OWN = new Set(["workosExternalId", "clerkMigrateRun", "clerkExternalId"]);
+      const meta = (u: User) => Object.entries(u.privateMetadata ?? {}).filter(([k]) => !OWN.has(k));
+      const full = users.filter((u) => meta(u).length === 10 && meta(u).every(([, v]) => String(v).length === 600));
+      const empty = users.filter((u) => meta(u).length === 0);
+      if (full.length !== 2) issues.push(`at-limit metadata → private metadata: ${full.length}/2 intact`);
+      if (empty.length !== 2) issues.push(`empty metadata → no private metadata: ${empty.length}/2`);
       return issues;
     },
   },
