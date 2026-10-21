@@ -301,7 +301,7 @@ The Clerk instance configs the tests import into. D1 is the default.
 | Target | Instance | Used by |
 |---|---|---|
 | `dev` (default) | the migrate-tests instance (`CLERK_MIGRATE_TESTS_1_*` in `op.env`) | every variation except the 10K ones and Clerk as a source; also the Clerk-as-source instance |
-| `migrate-prod` (default for `-p clerk`) | the migrate-tests app's production instance (`CLERK_TO_CLERK_IMPORT_*` in `op.env`) | Clerk as a source: the CLI won't import an export back into the instance it came from |
+| `evals-1` (default for `-p clerk`) | the first eval target (`CLERK_EVALS_1_*`) | Clerk as a source: the CLI won't import an export back into the instance it came from |
 | `10k-dev` | 10K dev (user limit raised to 10,000) | BK1K |
 | `10k-prod` | 10K production | BK |
 
@@ -408,12 +408,12 @@ reserved. An `R` variation passes the flag, and every one must be reserved.
 
 | ID | What it tests | Dests | Target |
 |---|---|---|---|
-| C1 | email + password | D1 | migrate-prod |
-| C2 | email + username + phone + password | D1 | migrate-prod |
-| C3 | phone only, including a European number | D1 | migrate-prod |
-| C4 | email code only: no passwords at the source (D5 as the source config) | D1 | migrate-prod |
-| C5 | TOTP + backup codes on half the users, which the API can't export | D1 | migrate-prod |
-| C6 | public, private and unsafe metadata, and banned users | D1 | migrate-prod |
+| C1 | email + password | D1 | evals-1 |
+| C2 | email + username + phone + password | D1 | evals-1 |
+| C3 | phone only, including a European number | D1 | evals-1 |
+| C4 | email code only: no passwords at the source (D5 as the source config) | D1 | evals-1 |
+| C5 | TOTP + backup codes on half the users, which the API can't export | D1 | evals-1 |
+| C6 | public, private and unsafe metadata, and banned users | D1 | evals-1 |
 
 ### Firebase (`-p firebase`)
 
@@ -667,14 +667,13 @@ folder; each result records a hash of the prompts it used.
 
 ### Clerk targets and locks
 
-Nine Clerk instances, each in one role, so batches can run side by side:
+Eight Clerk instances, each in one role, so batches can run side by side:
 
 | Instance | Keys in op.env | Role |
 |---|---|---|
 | `evals-1` … `evals-6` | `CLERK_EVALS_n_SECRET_KEY`, `CLERK_EVALS_n_APP_ID` | the eval pool: each run claims a free one |
 | `source` | `CLERK_SOURCE_SECRET_KEY`, `CLERK_EVALS_SOURCE_APP_ID` | Clerk as a provider in `eval:migrations` |
 | `migrate` | `CLERK_MIGRATE_TESTS_1_SECRET_KEY`, `CLERK_MIGRATE_TESTS_1_APP_ID` | `test:migrate` |
-| `migrate-prod` | `CLERK_TO_CLERK_IMPORT_SECRET_KEY`, `CLERK_TO_CLERK_IMPORT_APP_ID` | `test:migrate -p clerk`'s destination (not in `evals/targets.json`) |
 
 `evals/targets.json` maps each name to those variables; the code looks up each
 instance ID from its key. `eval:ready` checks each instance answers, says which

@@ -45,16 +45,17 @@ const CLI = resolve(value("cli")?.replace(/^~/, homedir()) ?? DEFAULT_CLI);
 // The variations' own CLI calls (lib/clerk-source.ts) use the same build.
 process.env.MIGRATE_TEST_CLI = CLI;
 
-// Clerk as a source exports from dev, so it imports into the migrate app's production instance.
-const targetName = value("target") ?? (value("provider") === "clerk" ? "migrate-prod" : "dev");
+// Clerk as a source exports from dev, and the CLI won't import an export back
+// into the instance it came from, so it imports into evals-1.
+const targetName = value("target") ?? (value("provider") === "clerk" ? "evals-1" : "dev");
 await resolveTargets();
-let TARGET: { app: string; instance: string; key: string } | undefined = TARGETS[targetName as keyof typeof TARGETS];
+let TARGET: { app: string; instance: string; key: string } | undefined = TARGETS[targetName as TargetName];
 /**
  * How the variations see the target. A Clerk target from evals/targets.json
  * (`-t evals-1`, as the slice tests use) is a development instance, so it runs
- * as `dev` does; `migrate-prod` runs the dev variations too.
+ * as `dev` does.
  */
-let targetKind = (targetName === "migrate-prod" ? "dev" : targetName) as TargetName;
+let targetKind = targetName as TargetName;
 if (!TARGET) {
   const specs = targetSpecs();
   const spec = [...specs.pool, specs.source, specs.migrate].find((t) => t.name === targetName);
@@ -120,9 +121,10 @@ const SOURCES: Record<string, Source> = {
   },
   // WORKOS_API_KEY passes through; -y implies --with-identities, said explicitly here.
   workos: { cli: "workos", env: () => ({}), args: () => ["--with-identities"] },
-  // Clerk as a source: export from SOURCE, the dev instance by default (the
-  // import goes to migrate-prod), or the migration eval's separate source
-  // instance, which then needs its own key.
+  // Clerk as a source: export from dev, import into evals-1
+  // (variations/clerk.ts deletes the seed before the import).
+  // From SOURCE: the destination instance itself (Stage 7), or the migration
+  // eval's separate source instance, which then needs its own key.
   clerk: {
     cli: "clerk",
     env: () => ({}),

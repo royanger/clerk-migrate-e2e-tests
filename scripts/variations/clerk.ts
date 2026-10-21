@@ -1,10 +1,9 @@
 /**
  * Clerk as a source (C1–C6 in .testing-plan.md): a Clerk-to-Clerk migration.
  *
- * The source is the dev instance and the destination the same app's production
- * instance (target migrate-prod), a dev → prod move: the CLI refuses to import
- * an export back into the instance it came from. The runner seeds, exports,
- * then calls reset(), which empties the source, before it imports.
+ * The source is the dev instance and the destination evals-1: the CLI refuses
+ * to import an export back into the instance it came from. The runner seeds,
+ * exports, then calls reset(), which empties the source, before it imports.
  *
  * What `clerk migrate export clerk` can carry (export/clerk.ts): identifiers,
  * names, the three metadata blobs, banned, created_at and a few account flags.
