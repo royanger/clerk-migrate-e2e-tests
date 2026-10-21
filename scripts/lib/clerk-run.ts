@@ -65,13 +65,16 @@ type Target = { app: string; instance: string; key: string };
 
 /**
  * Clerk instances test:migrate can import into. `dev` takes every test except
- * the 10K ones (and is the Clerk-as-source instance too); the other two are
- * 10K only. `dev` is the migrate-tests instance: its key and app ID come from
- * the environment (op.env), and its instance ID from its key, so call
- * `resolveTargets()` once before reading `TARGETS.dev.instance`.
+ * the 10K ones and Clerk as a source (it is the Clerk-as-source instance);
+ * `migrate-prod` takes Clerk as a source, since the CLI won't import a Clerk
+ * export back into the instance it came from; the other two are 10K only.
+ * `dev` and `migrate-prod` take their key and app ID from the environment
+ * (op.env), and their instance ID from their key, so call `resolveTargets()`
+ * once before reading their `instance`.
  */
-export const TARGETS: Record<"dev" | "10k-dev" | "10k-prod", Target> = {
+export const TARGETS: Record<"dev" | "migrate-prod" | "10k-dev" | "10k-prod", Target> = {
   dev: { app: process.env.CLERK_MIGRATE_TESTS_1_APP_ID ?? "", instance: "", key: "CLERK_MIGRATE_TESTS_1_SECRET_KEY" },
+  "migrate-prod": { app: process.env.CLERK_TO_CLERK_IMPORT_APP_ID ?? "", instance: "", key: "CLERK_TO_CLERK_IMPORT_SECRET_KEY" },
   "10k-dev": { app: "app_3JVnO515SfI9c8lo2l3KskmG7MQ", instance: "ins_3JVnO75emwoOfD4sY7FeE5BDJFi", key: "CLERK_SECRET_KEY_10K_DEV" },
   "10k-prod": { app: "app_3JVnO515SfI9c8lo2l3KskmG7MQ", instance: "ins_3JVszqLLBrKGLYjh7Ag1f4kRGny", key: "CLERK_SECRET_KEY_10K_PROD" },
 };
@@ -83,10 +86,12 @@ export async function instanceIdOf(secretKey: string): Promise<string> {
   return ((await res.json()) as { id: string }).id;
 }
 
-/** Fills in what TARGETS takes from the environment: the dev instance's ID, from its key. */
+/** Fills in what TARGETS takes from the environment: each env target's instance ID, from its key. */
 export async function resolveTargets() {
-  const key = process.env[TARGETS.dev.key];
-  if (!TARGETS.dev.instance && key) TARGETS.dev.instance = await instanceIdOf(key);
+  for (const t of [TARGETS.dev, TARGETS["migrate-prod"]]) {
+    const key = process.env[t.key];
+    if (!t.instance && key) t.instance = await instanceIdOf(key);
+  }
 }
 
 /**
