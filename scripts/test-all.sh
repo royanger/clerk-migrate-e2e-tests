@@ -13,6 +13,9 @@
 # Arguments are passed to every test-migrate.ts run, e.g. a CLI checkout other
 # than DEFAULT_CLI:  pnpm test:migrate:all --cli <path/to/cli.ts>
 set -u
+# Ctrl-C ends the batch, not just the current run: test-migrate.ts exits 130
+# on SIGINT instead of dying by it, so bash would otherwise start the next one.
+trap 'echo; echo "Interrupted: batch stopped"; exit 130' INT
 cd "$(dirname "$0")/.."
 EXTRA=("$@")
 # test-migrate.ts puts each run in a sub-folder of this batch.
