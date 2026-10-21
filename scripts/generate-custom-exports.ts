@@ -97,6 +97,8 @@ export type AnswerKey = {
   metadataPlacement: "strict" | "advisory";
   /** Private keys graded even when placement is advisory or lenient: billing and CRM IDs, internal notes. */
   sensitive?: string[];
+  /** Whether each unverified email and phone must land reserved (true) or not (false). Unset: not graded. */
+  reserveUnverified?: boolean;
   users: Expected[];
 };
 

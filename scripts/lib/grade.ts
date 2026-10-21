@@ -67,8 +67,12 @@ function checksFor(
   placement: AnswerKey["metadataPlacement"],
   lenient: Lenient = {},
   sensitive: string[] = [],
+  reserve?: boolean,
 ): Check[] {
   const checks: Check[] = [{ field: "user", ok: Boolean(u), reason: "not imported" }];
+  // The @clerk/backend resources leave `reserved` out, so read the raw JSON.
+  const raw = u?.raw as { email_addresses?: { id: string; reserved?: boolean }[]; phone_numbers?: { id: string; reserved?: boolean }[] } | null | undefined;
+  const reservedIds = new Set([...(raw?.email_addresses ?? []), ...(raw?.phone_numbers ?? [])].filter((i) => i.reserved).map((i) => i.id));
 
   // ── identifiers: each expected one present, verified as expected, nothing extra ──
   const idChecks = (
@@ -76,7 +80,7 @@ function checksFor(
     verified: string[],
     unverified: string[],
     primary: string | undefined,
-    held: { value: string; verified: boolean; id: string }[],
+    held: { value: string; verified: boolean; reserved: boolean; id: string }[],
     primaryId: string | null | undefined,
   ) => {
     const find = (v: string) => held.find((h) => h.value.toLowerCase() === v.toLowerCase());
@@ -93,6 +97,9 @@ function checksFor(
     for (const v of unverified) {
       const h = find(v);
       checks.push({ field: kind, ok: Boolean(h && !h.verified), reason: h ? "verified, should be unverified" : "missing", example: `expected ${v} (unverified)` });
+      // Reserved is still unverified: graded only where the key says which it should be.
+      if (h && !h.verified && reserve !== undefined)
+        checks.push({ field: kind, ok: h.reserved === reserve, reason: reserve ? "unverified, should be reserved" : "reserved, should be unverified", example: v });
     }
     if (primary) {
       const got = held.find((h) => h.id === primaryId)?.value;
@@ -108,12 +115,12 @@ function checksFor(
   };
   idChecks(
     "email", e.emails, e.unverifiedEmails, e.primaryEmail,
-    (u?.emailAddresses ?? []).map((a) => ({ value: a.emailAddress, verified: a.verification?.status === "verified", id: a.id })),
+    (u?.emailAddresses ?? []).map((a) => ({ value: a.emailAddress, verified: a.verification?.status === "verified", reserved: reservedIds.has(a.id), id: a.id })),
     u?.primaryEmailAddressId,
   );
   idChecks(
     "phone", e.phones, e.unverifiedPhones, e.primaryPhone,
-    (u?.phoneNumbers ?? []).map((p) => ({ value: p.phoneNumber, verified: p.verification?.status === "verified", id: p.id })),
+    (u?.phoneNumbers ?? []).map((p) => ({ value: p.phoneNumber, verified: p.verification?.status === "verified", reserved: reservedIds.has(p.id), id: p.id })),
     u?.primaryPhoneNumberId,
   );
 
@@ -260,7 +267,7 @@ export function grade(
       continue;
     }
 
-    const checks = checksFor(e, u, badPasswords, lenient.placement ? "advisory" : key.metadataPlacement, lenient, key.sensitive);
+    const checks = checksFor(e, u, badPasswords, lenient.placement ? "advisory" : key.metadataPlacement, lenient, key.sensitive, key.reserveUnverified);
     if (idProblem) checks.push({ field: "userId", ok: false, reason: "wrong value", example: idProblem });
     const graded = checks.filter((c) => !c.note);
     total += graded.length;

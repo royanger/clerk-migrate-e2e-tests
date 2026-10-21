@@ -3,13 +3,14 @@
  * export becomes in Clerk when the CLI is used correctly, under given Clerk
  * settings. Keys are filed by those settings, not by answer set, so every set
  * of either eval with the same settings shares one key:
- *   <dest>[-partial]   e.g. D2-partial: Clerk settings D2, --allow-partial
+ *   <dest>[-partial][-reserved]   e.g. D2-partial: Clerk settings D2, --allow-partial;
+ *                                 -reserved adds --reserve-unverified
  *
  *   pnpm eval:imports:golden              every settings combination any import/migration set uses × provider
  *   pnpm eval:imports:golden -p auth0     one provider
  *
  * On one Clerk target claimed from the pool, per settings × provider: empty it → those Clerk settings →
- * `clerk migrate import --yes` (with --allow-partial when they say so) →
+ * `clerk migrate import --yes` (with --allow-partial and --reserve-unverified when they say so) →
  * read every user back, check each password signs in → undo.
  *
  * Writes data/provider-exports/golden/<settings>/<provider>.expected.json in the
@@ -46,7 +47,8 @@ export type GoldenKey = AnswerKey & {
 };
 
 /** Where an answer set's golden keys live: named for its Clerk settings. */
-export const settingsOf = (set: AnswerSet) => `${set.meta.dest}${set.meta.allowPartial ? "-partial" : ""}`;
+export const settingsOf = (set: AnswerSet) =>
+  `${set.meta.dest}${set.meta.allowPartial ? "-partial" : ""}${set.meta.reserveUnverified ? "-reserved" : ""}`;
 export const goldenFile = (settings: string, provider: string) => `data/provider-exports/golden/${settings}/${provider}.expected.json`;
 export const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
@@ -92,12 +94,14 @@ export function runUsers(file: string): Map<string, { status: string; reason?: s
 async function main() {
   const cfg = loadConfig();
   // One build per distinct settings combination across both evals' sets.
-  const combos = new Map<string, { dest: DestId; allowPartial: boolean; usedBy: string[] }>();
+  const combos = new Map<string, { dest: DestId; allowPartial: boolean; reserveUnverified: boolean; usedBy: string[] }>();
   for (const kind of ["imports", "migrations"] as const) {
     for (const name of listSets(setsDir(kind))) {
       const set = loadSet(name, setsDir(kind));
       const key = settingsOf(set);
-      const c = combos.get(key) ?? { dest: set.meta.dest as DestId, allowPartial: Boolean(set.meta.allowPartial), usedBy: [] };
+      const c = combos.get(key) ?? {
+        dest: set.meta.dest as DestId, allowPartial: Boolean(set.meta.allowPartial), reserveUnverified: Boolean(set.meta.reserveUnverified), usedBy: [],
+      };
       c.usedBy.push(`${kind}/${name}`);
       combos.set(key, c);
     }
@@ -115,7 +119,7 @@ async function main() {
   if (await clerk.settledCount()) await deleteAllUsers(clerk.clerk);
   let failed = 0;
   try {
-    for (const [settings, { dest, allowPartial, usedBy }] of combos) {
+    for (const [settings, { dest, allowPartial, reserveUnverified, usedBy }] of combos) {
       if (!DESTS[dest]) throw new Error(`${usedBy.join(", ")}: dest "${dest}" is not one of ${Object.keys(DESTS).join(" ")}`);
       console.log(`${settings} (used by ${usedBy.join(", ")})`);
       await patch(withBaseline(DESTS[dest]));
@@ -133,7 +137,8 @@ async function main() {
           const existing = await clerk.settledCount();
           if (existing) throw new Error(`instance ${t.name}: ${t.app} ${t.instance} already has ${existing} users: run pnpm teardown`);
           const imp = await clerk.cli([
-            "migrate", "import", file, "--yes", "--json", ...(allowPartial ? ["--allow-partial"] : []), ...target, "--runs-dir", runs,
+            "migrate", "import", file, "--yes", "--json", ...(allowPartial ? ["--allow-partial"] : []),
+            ...(reserveUnverified ? ["--reserve-unverified"] : []), ...target, "--runs-dir", runs,
           ]);
           importRun = imp.json?.run?.id;
           if (!imp.json?.result) throw new Error(`import exited ${imp.code}: ${JSON.stringify(imp.json?.error ?? imp.json).slice(0, 300)}`);
@@ -155,6 +160,7 @@ async function main() {
             settings,
             dest,
             allowPartial,
+            reserveUnverified,
             cliVersion: version,
             exportSha: sha256(file),
             createdAt: new Date().toISOString(),

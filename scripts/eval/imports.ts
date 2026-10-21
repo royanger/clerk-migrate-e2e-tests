@@ -213,7 +213,7 @@ function resultMarkdown(r: Result, set: AnswerSet, golden: GoldenKey): string {
     "|---|---|",
     `| Agent | ${r.agent} (${r.model}, effort ${r.effort}) |`,
     `| Clerk target | ${r.target ?? "none claimed"} |`,
-    `| Answer set | ${set.name} v${r.setVersion} · Clerk settings ${set.meta.dest}${set.meta.allowPartial ? " · told to import the rest" : ""} |`,
+    `| Answer set | ${set.name} v${r.setVersion} · Clerk settings ${set.meta.dest}${set.meta.allowPartial ? " · told to import the rest" : ""}${set.meta.reserveUnverified ? " · told to reserve unverified" : ""} |`,
     `| Skill | ${skillHash} |`,
     `| Prompts | ${prompts.dir} (${prompts.hash}) |`,
     `| CLI | ${cliVersion(cfg.cli)} (golden key: ${golden.cliVersion}) |`,
