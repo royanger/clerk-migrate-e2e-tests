@@ -183,8 +183,12 @@ const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
  *                        export.json, users.ndjson and run.json it wrote
  * report.json names each variation's CLI export and import run, so a report
  * leads straight to its CLI runs.
+ *
+ * In a batch (test-all.sh, or a slice test), MIGRATE_BATCH names the batch's
+ * folder, and the run is `<batch>/<provider>-<target>` inside it instead.
  */
-const runName = `${stamp}-${provider}-${targetName}`;
+const batch = process.env.MIGRATE_BATCH;
+const runName = batch ? join(batch, `${provider}-${targetName}`) : `${stamp}-${provider}-${targetName}`;
 const runDir = resolve("test-results", runName);
 const clerkRunsDir = resolve("clerk-runs", runName);
 mkdirSync(runDir, { recursive: true });

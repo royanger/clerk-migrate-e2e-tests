@@ -237,7 +237,10 @@ reason fails the test.
 ### Results
 
 Each test run writes to two folders with the same name,
-`<timestamp>-<provider>-<target>`:
+`<timestamp>-<provider>-<target>`. A batch puts its runs in one folder stamped
+when it started: `pnpm test:migrate:all` in `<timestamp>-all/`, with a
+`summary.md` of each run's result, and a slice test in `<timestamp>-slice<N>/`.
+Each run is a `<provider>-<target>/` sub-folder there, in both places:
 
 | Folder | What's in it |
 |---|---|

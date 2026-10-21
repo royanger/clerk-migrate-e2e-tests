@@ -22,7 +22,8 @@
  * Every CLI call sets CLERK_EXPERIMENTAL=migrate, which slices 1–5 need.
  *
  * Writes test-results/<stamp>-slice<N>/{report.md,report.json,log.txt}, and the
- * CLI's runs to clerk-runs/<same>/.
+ * CLI's runs to clerk-runs/<same>/. A slice that runs test-migrate.ts puts each
+ * provider's run in a sub-folder there, `<provider>-evals-1/`.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -138,14 +139,14 @@ if (slice.providers) {
     const code = await new Promise<number>((done) =>
       spawn("tsx", ["scripts/test-migrate.ts", "-p", provider, "--cli", CLI, "-t", TARGET_NAME], {
         stdio: "inherit",
-        env: { ...process.env, CLERK_AS_SOURCE_SECRET_KEY: sourceKey },
+        env: { ...process.env, CLERK_AS_SOURCE_SECRET_KEY: sourceKey, MIGRATE_BATCH: runName },
       }).on("exit", (c) => done(c ?? 1)),
     );
     rows.push({
       id: provider,
       name: `test:migrate -p ${provider}`,
       status: code === 0 ? "pass" : "fail",
-      notes: code === 0 ? [] : [`exit ${code}; see test-results/*-${provider}-${TARGET_NAME}/report.md`],
+      notes: code === 0 ? [] : [`exit ${code}; see test-results/${runName}/${provider}-${TARGET_NAME}/report.md`],
       seconds: Math.round((Date.now() - started) / 1000),
     });
   }

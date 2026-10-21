@@ -3,8 +3,10 @@
 #
 # Runs each source's variations on the dev instance, then the 1K run on the
 # raised-limit dev instance and the 10K run on production. A failing source
-# doesn't stop the rest; the summary at the end lists each one's exit code,
-# and every report is in test-results/<stamp>-<provider>-<target>/report.md.
+# doesn't stop the rest. Everything goes in one batch folder, stamped when this
+# starts: test-results/<stamp>-all/summary.md lists each run's exit code, and
+# each run's report is test-results/<stamp>-all/<provider>-<target>/report.md
+# (its CLI runs under clerk-runs/<stamp>-all/ the same way).
 #
 # Expects to run under `op run --env-file=op.env` (the package.json script does).
 #
@@ -13,6 +15,8 @@
 set -u
 cd "$(dirname "$0")/.."
 EXTRA=("$@")
+# test-migrate.ts puts each run in a sub-folder of this batch.
+export MIGRATE_BATCH="$(date -u +%Y%m%dT%H%M%S)-all"
 
 # Free Supabase projects pause after a week idle; wake it before its turn.
 wake_supabase() {
@@ -52,3 +56,6 @@ run "better-auth 10K (prod)" -p better-auth -t 10k-prod -v BK
 
 echo; echo "=== Summary"
 printf '%s\n' "${summary[@]}"
+mkdir -p "test-results/$MIGRATE_BATCH"
+{ echo "# test:migrate:all — $MIGRATE_BATCH"; echo; echo '```'; printf '%s\n' "${summary[@]}"; echo '```'; } > "test-results/$MIGRATE_BATCH/summary.md"
+echo "Batch: test-results/$MIGRATE_BATCH/"
