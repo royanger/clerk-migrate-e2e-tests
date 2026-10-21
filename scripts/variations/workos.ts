@@ -39,7 +39,11 @@ export async function reset() {
   if (failed.length) throw new Error(`${failed.length} WorkOS users would not delete: ${String(failed[0].error)}`);
 
   const orgs = (await w.organizations.listOrganizations({ limit: 100 })).data.filter((o) => o.name.startsWith(ORG));
-  for (const o of orgs) await w.organizations.deleteOrganization(o.id);
+  // The list lags deletes: it can still show an org an earlier reset removed.
+  for (const o of orgs)
+    await w.organizations.deleteOrganization(o.id).catch((e) => {
+      if (e?.status !== 404) throw e;
+    });
 }
 
 /** listUsers is the export's source of truth; make sure it shows every seeded user. */
