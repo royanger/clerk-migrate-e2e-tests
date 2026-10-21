@@ -61,13 +61,22 @@ topics.json      topic → what it covers; the runner matches questions to these
 Their `set.json` also says which Clerk settings every run with the set uses:
 
 ```json
-{ "dest": "D2", "allowPartial": true }
+{ "dest": "D2", "allowPartial": true, "reserveUnverified": true }
 ```
 
 - **dest:** D1–D5 from `scripts/lib/clerk-dest.ts`.
 - **allowPartial:** whether the answers tell the agent to import the users that
   pass and skip the rest.
+- **reserveUnverified:** whether the answers tell the agent to reserve the
+  emails and phones the export never verified (`## verification (reserved)`).
+  The grade then wants every unverified one reserved; without it, none.
 
 Their golden answer keys (`pnpm eval:imports:golden`) are filed by these
-settings (`data/provider-exports/golden/D2-partial/`), so a set in either eval
-with the same settings shares a key; a set with new settings needs a new build.
+settings (`data/provider-exports/golden/D2-partial/`, or `D2-partial-reserved/`
+with `reserveUnverified`), so a set in either eval with the same settings
+shares a key; a set with new settings needs a new build. A key built before
+`reserveUnverified` existed doesn't grade reserving at all: rebuild it.
+
+The process checks follow the `verification` answer's tag: `--reserve-unverified`
+on an import needs a `verification: reserved` answer first, and that answer
+needs the flag on an import after it.
