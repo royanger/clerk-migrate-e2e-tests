@@ -55,11 +55,9 @@ Install nothing and clone nothing.
 | See what a run did, or why users failed                                                  | [references/runs.md](references/runs.md)                       |
 | Undo an import                                                                           | [Re-running, runs, and undo](#re-running-runs-and-undo)        |
 
-"Here's my Supabase dump" is an import. "I need to get my users out of Auth0" is an export that ends in an import.
-
 ## The rules
 
-Every `clerk migrate` command follows these five rules. Rely on them.
+Every `clerk migrate` command follows these five rules.
 
 1. **Consent.** `import` and `undo` write only after `--yes` or a yes at the prompt. Without either (agent mode, a non-TTY, or `--json`), they print a preview and exit `2` with the exact command to run. In agent mode that command is in the stderr JSON, `error.examples[].command`; with `--json`, stdout also carries the preview with `"consent": "required"`. A suggested command may hold a `--secret-key <key>` placeholder: never fill in a real key yourself.
 2. **`--dry-run` checks against the real instance and writes nothing.** It exits `2` when the real run would be refused, and `0` otherwise.
@@ -67,7 +65,7 @@ Every `clerk migrate` command follows these five rules. Rely on them.
 4. **Target first.** `import`, `undo` and `export` print the environment, app and instance they target, and where the key came from. With `--json` the same data is in the `target` field.
 5. **`--json` everywhere.** Every subcommand takes it, and it means no prompts. `--json` on any `migrate` subcommand also forces agent mode.
 
-Exit codes: `0` success, `1` some users failed or any runtime, API or auth error, `2` a usage error or a refusal, `130` interrupted. **`0` does not mean every user arrived**: skips under `--allow-partial` and users the run did not send still exit `0`. Read `result.failed`, `result.skipped`, `result.notSent` and `result.pending` from `import --json`, or `state` from `clerk migrate runs <run-id> --json`.
+Exit codes: `0` success, `1` some users failed or any runtime, API or auth error, `2` a usage error or a refusal, `130` interrupted. **`0` does not mean every user arrived**: skips under `--allow-partial` still exit `0`. Users the run did not send come with `1` (Clerk refused a create, such as the user limit) or `130` (interrupted). Read `result.failed`, `result.skipped`, `result.notSent` and `result.pending` from `import --json`, or `state` from `clerk migrate runs <run-id> --json`.
 
 ## Invoking the CLI
 
@@ -81,14 +79,14 @@ If that prints `ok`, use bare `clerk`. Otherwise fall back to a package runner m
 
 ## Keys and targeting
 
-**Do not create or edit a `.env` file, and do not ask the user to paste a secret key** unless everything below has failed. The CLI resolves a Backend API key on its own, from flags, the process environment, the linked project, or (in an unlinked keyless project) the project's `.env`, `.env.local` and `.clerk/.tmp/keyless.json`:
+**Do not create or edit a `.env` file.** The CLI resolves a Backend API key on its own, from flags, the process environment, the linked project, or (in an unlinked keyless project) the project's `.env`, `.env.local` and `.clerk/.tmp/keyless.json`:
 
 ```sh
 clerk auth login          # once, on the user's host shell; opens a browser
 clerk doctor --json       # confirms login, link, keys; parse `remedy` on failure
 ```
 
-Resolution order: `--secret-key` → `--app` + Platform API lookup → `CLERK_SECRET_KEY` in the environment → the keyless project's own key → the linked project from `clerk link`.
+Resolution order: `--secret-key` → `--app` + Platform API lookup → `CLERK_SECRET_KEY` in the environment → the keyless project's own key → the linked project from `clerk link`. If none of these resolves a key, ask the user to run `clerk auth login` or set `CLERK_SECRET_KEY` themselves (Safety rule 4).
 
 Pass `--app <id>` and `--instance dev|prod|<instance_id>` to point a command somewhere specific. A dev → production migration needs no key swapping.
 
@@ -100,7 +98,7 @@ For auth internals, sandbox caveats, or `clerk api`, see the `clerk-cli` skill.
 
 ## The import flow
 
-Follow these steps in order. Do not skip the dry run or the user's confirmation.
+Follow these steps in order.
 
 ### Step 1: identify the source
 
@@ -116,7 +114,7 @@ Any other file (a bare JSON array, a CSV, Firebase's own `{ "users": [...] }`) n
 | `clerk`        | `primary_email_address`, `verified_email_addresses`, `password_digest`, `password_hasher`, `primary_phone_number`                       |
 | `workos`       | `id` starting `user_`, `email`, `email_verified` (boolean), `first_name`, `last_name`, `metadata`, sometimes `identities`; no password, phone, or username |
 | `betterauth`   | `user_id` (UUID), `email_verified` (boolean), `password_hash`, `phone_number`, `phone_number_verified`, `display_username`              |
-| `authjs`       | `email_verified`, `name`, `id`, `email`; minimal, and easy to confuse with a custom export                                             |
+| `authjs`       | `email_verified`, `name`, `id`, `email`; minimal, and similar to some custom exports                                                   |
 
 Three traps:
 
@@ -137,14 +135,14 @@ A built-in `--source` that contradicts an envelope's `source` exits `2`. A path 
 
 ### Step 2: summarize what will happen
 
-Tell the user, in plain terms:
+Run the [Step 3](#step-3-dry-run) dry run first when a question needs its numbers. It writes nothing.
+
+Tell the user:
 
 1. Which source applies, and which instance the import targets.
 2. Which field decides whether an email or phone counts as **verified**. That mapping changes who can sign in. Per-source detail: [references/sources.md](references/sources.md#what-the-built-ins-carry).
-3. What the source cannot carry. Clerk (API export), Auth0 and WorkOS exports hold **no password hashes**, so those users reset their password. **Social sign-ins are never copied**: the user enables the same providers in Clerk, and Clerk links a returning user by verified email ([account linking](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/account-linking)).
-4. Sign-in identifiers outside the mapped fields: phone or username keys in metadata, a name field holding usernames or phone numbers, placeholder emails such as `<digits>@phone.local` that hide a phone. A built-in source imports these as metadata or a first name, and the dry run doesn't flag them. Ask the user whether to import them as real identifiers. That takes a [custom source](references/sources.md#writing-a-source), and the dry run then offers the instance changes it needs: phone or username sign-in, email made optional, extended special characters for usernames with a dot. Apply each only with the user's yes.
-
-   To map an export run with a source you wrote, pass the run ID and the path: `clerk migrate import <export-run-id> --source ./my-source.ts`. It replaces the built-in source and keeps the link to the export run. Its `preTransform` does not run on an envelope.
+3. What the source cannot carry. Clerk (API export), Auth0 and WorkOS exports hold **no password hashes**, so users who signed in with a password reset it. **Social sign-ins are never copied**: the user enables the same providers in Clerk, and Clerk links a returning user by verified email ([account linking](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/account-linking)).
+4. Sign-in identifiers outside the mapped fields: phone or username keys in metadata, a name field holding usernames or phone numbers, placeholder emails such as `<digits>@phone.local` that hide a phone. A built-in source imports these as metadata or a first name, and the dry run doesn't flag them. Ask the user to choose: convert them into real identifiers, or import them as exported (the default) and let the dry run reject what Clerk refuses. In a source you write, nothing is "as exported". A column that is itself the sign-in identifier (a `login` holding an email, a phone or a username per row) is not a conversion question: route each value by its shape ([Common export shapes](references/sources.md#common-export-shapes)), and don't ask A or B. When the user can't choose about another field that holds a sign-in handle (`username`, `nick`, `handle`), map it to `username`. Never pick a default that leaves a user with no identifier. "Import them", "go ahead" or a bare yes picks neither, so ask again and name both. Converting takes a [custom source](references/sources.md#writing-a-source), and the dry run then offers the instance changes it needs: phone or username sign-in, email made optional, extended special characters for usernames with a dot. Apply each only with the user's yes.
 5. Two choices the CLI makes only with the user's yes. Ask about each one that applies, and pass the flag only on a yes to that question:
    - **`--reserve-unverified`.** Users with an email or phone the source never verified. By default Clerk attaches those unverified. Reserved, they work for sign-in and are locked to the user, and they count toward a required email or phone. The source never confirmed these belong to the user, so whoever receives mail or texts at one can sign in as that user. Tell the user that when you ask, and recommend it only when the old platform confirmed addresses some other way. A reserved address another user already holds rejects the whole user. A continued run keeps the choice its first attempt recorded.
    - **`--skip-legal-checks`.** When the instance requires legal consent, users with no `legal_accepted_at` are rejected. The flag imports them without it.
@@ -163,6 +161,8 @@ The dry run prints the target, then the checks, and writes nothing. Relay the ch
 
 If any user is rejected, the real import refuses unless `--allow-partial` is passed. Put the choice to the user: fix the export, change the instance with the printed `clerk config patch` command, or import the rest with `--allow-partial`. Never run a `clerk config patch` without the user's yes.
 
+Users without a password import even when the instance requires one, unless a password is its only way to sign in. Pass `--require-password` only when the user asks to leave those users out ([checks.md](references/checks.md#passwords-and---require-password)).
+
 ### Step 4: get consent, then import
 
 Pick one path:
@@ -173,15 +173,15 @@ Pick one path:
   clerk migrate import <export-run-id>
   ```
 
-- **Run it yourself** after the user has said yes to your Step 2 summary and the dry-run checks. Relay the checks, then end your turn and wait for the answer. Never run `--yes` in the same turn as the dry run; a yes given before the user saw the checks doesn't count:
+- **Run it yourself** after the user has said yes to your Step 2 summary and the dry-run checks. Relay the checks, then end your turn and wait for the answer. Never run `--yes` in the same turn as the dry run; a yes given before the user saw the checks doesn't count. Ask the go-ahead as its own question, with the numbers the import will use: "Create 42 users and skip 8? This runs `clerk migrate import <export-run-id> --allow-partial --yes`." Only a yes to that question counts. An answer to the rejects, verification or settings questions doesn't, whatever it says about importing:
 
   ```sh
   clerk migrate import <export-run-id> --yes
   ```
 
-If you run the import without `--yes`, it prints the checks and exits `2` with the exact command. Show that output to the user and ask before re-running with `--yes`. An exit `2` there is the consent gate, not a failure.
+Without `--yes`, an exit `2` is the consent gate from rule 1, not a failure.
 
-Firebase exports carry the project's hash parameters when the export could read them, so the import needs no `--firebase-*` flags. See [references/export.md](references/export.md#firebase) for files from `firebase auth:export`.
+Firebase exports carry the project's hash parameters when the export could read them, so the import needs no `--firebase-*` flags. See [references/export.md](references/export.md#firebase) for files from `firebase auth:export`. When the user gives the four parameters, pass them and keep the passwords, even if they also say users can reset. Never strip hashes from the export or write an edited copy of it.
 
 ### Step 5: report the result
 
@@ -200,20 +200,21 @@ Compare their identifiers, verification and metadata placement with what you tol
 Report:
 
 1. How many users were created, failed, and skipped. `runs <id>` shows the error breakdown and the users that failed or were skipped.
-2. The run ID, and that `clerk migrate undo <run-id>` reverses it.
-3. Any user who arrived without something: a dropped password, a field the instance does not store.
-4. Every mismatch the spot-check found.
+2. Users the run did not send (`result.notSent`) and why (`result.stopReason`). A run that hit the user limit stops at the first refusal: raise the limit or import into production, then re-run the same command to continue.
+3. The run ID, and that `clerk migrate undo <run-id>` reverses it.
+4. Any user who arrived without something: a dropped password, a field the instance does not store.
+5. Every mismatch the spot-check found.
 
-Check the exit code and the counts: `1` means some users failed, and a `0` can still be partial. Report a partial import as partial.
+Report a partial import as partial.
 
 ## Re-running, runs, and undo
 
-Running the same import again continues it: an interrupted or `partial` run picks up where it stopped, and a `complete` one prints "Already imported in run …" and exits `0`. `--new-run` forces a fresh run.
+Running the same import again continues it: an interrupted or `partial` run picks up where it stopped, a `complete` one prints "Already imported in run …" and exits `0`, and an `undone` one starts a new run. `--new-run` forces a fresh run.
 
 ```sh
 clerk migrate runs                        # every run, newest first
 clerk migrate runs <run-id>               # one run: counts, errors, the users that did not make it
-clerk migrate undo <run-id> --dry-run     # preview: how many, and how many signed in since
+clerk migrate undo <run-id> --dry-run     # preview: how many, and a warning if any signed in since (`--json` always has `signedInSince`)
 clerk migrate undo <run-id> --yes
 ```
 
@@ -228,9 +229,10 @@ Matching, refusals, run files and every undo case: [references/runs.md](referenc
 1. **Dry-run first, then get a yes.** Relay the checks and the target before any write.
 2. **Check the target.** The first lines of output name the instance. Pass `--instance prod` explicitly for production.
 3. **Name the source instance when exporting from Clerk.** The linked project is usually the *destination*, so in agent mode `clerk migrate export clerk` refuses with exit `2` until `--secret-key`, `--app`/`--instance` or `CLERK_SECRET_KEY` names the source.
-4. **Never paste a secret key into chat or a file.** Use `clerk auth login`, or let the user set `CLERK_SECRET_KEY` themselves.
+4. **Never ask for the destination's Clerk secret key, and never write a Clerk key to a file.** Use `clerk auth login` or the linked project, or let the user set `CLERK_SECRET_KEY` themselves. Every other credential the user gives you is for the source: a Firebase service-account key, a database URL, an API key or token, or the key of a different Clerk application you export from. Use it as the export command expects. Don't refuse it because it came through chat, and don't ask the user to revoke it and send it again. Keep it out of your output and summary.
 5. **Report failures honestly.** A partial import is normal and recoverable. Re-run the same command to continue it.
-6. **Never pass a consent flag on your own.** `--yes`, `--include-signed-in`, `--reserve-unverified`, `--skip-legal-checks` and `--allow-partial` each need the user's yes. An answer counts as a yes only when it answers that flag's question: "import", "go ahead", or text about something else is not a yes to `--reserve-unverified` or `--skip-legal-checks`. Ask again, naming the flag and what it does.
+6. **Never pass a consent flag on your own.** `--yes`, `--include-signed-in`, `--reserve-unverified`, `--skip-legal-checks`, `--allow-partial` and `--trust-oauth-emails` each need the user's yes. An answer counts as a yes only when it answers that flag's question: "import", "go ahead", or text about something else is not a yes to `--reserve-unverified` or `--skip-legal-checks`. Ask again, naming the flag and what it does.
+7. **Ask when two answers conflict.** If two of the user's answers disagree about the same change (one says to turn placeholder emails into phone numbers, another says not to make anything into a phone number), quote both and ask once which one holds. Don't settle it by reading one answer as covering less than it says. Until they answer, keep the option that changes less: import as exported. Users the dry run then rejects still need a yes to `--allow-partial`. If the answer is still unclear, keep that option and say so in your summary.
 
 ## References
 

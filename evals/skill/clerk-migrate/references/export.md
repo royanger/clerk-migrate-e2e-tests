@@ -49,7 +49,7 @@ The `.clerk/` folder is gitignored automatically. The export file holds user dat
 | `supabase`   | `--db-url` (Postgres only)                                      | `SUPABASE_DB_URL`                                        | bcrypt or argon2, per user       |
 | `authjs`     | `--db-url`                                                      | `AUTHJS_DB_URL`                                          | none — Auth.js stores none       |
 | `betterauth` | `--db-url`                                                      | `BETTERAUTH_DB_URL`                                      | scrypt, bcrypt or argon2, per user |
-| `firebase`   | `--service-account <path>`                                      | none                                                     | scrypt digests + four parameters |
+| `firebase`   | `--service-account <path or JSON>`                              | none                                                     | scrypt digests + four parameters |
 
 Resolution is flag → environment variable → a masked prompt. The CLI does not read `.env` files for these platform credentials. In agent mode there is no prompt, so pass the flags; a missing credential exits naming every missing one at once. Ask the user for a credential; never guess one, and never write it into a `.env` file on their behalf.
 
@@ -66,7 +66,7 @@ Field coverage
   ! 1102/1247 have a password (not exportable — see below)
 ```
 
-`✓` means every user has the field, `!` some, `✗` none. **Say something about the `!` and `✗` rows.** A user with a password the export cannot carry is a user who resets it after the import, and it is far cheaper to say so now than after.
+`✓` means every user has the field, `!` some, `✗` none. **Tell the user about the `!` and `✗` rows.** A user with a password the export cannot carry resets it after the import.
 
 Three platforms never export passwords, **Clerk, Auth0 and WorkOS**, and each shows it differently:
 
@@ -82,7 +82,7 @@ clerk migrate export clerk --app app_source123 --instance dev
 
 Pages the whole instance 500 users at a time. **Password digests, TOTP secrets and backup codes are never returned by the API** — only the `*_enabled` booleans. Migrated users must reset their password on the destination.
 
-**Name the source instance.** `--secret-key`, `--app`, `--instance` or an exported `CLERK_SECRET_KEY` are taken as-is. Without one, a human gets a picker of every instance on their account, and an **agent, `--json` or `-y` run exits `2`**, because what the CLI resolves on its own is usually the linked project, which is usually the migration's destination. Exporting the destination and importing it back into itself is the failure this rule prevents.
+**Name the source instance.** `--secret-key`, `--app`, `--instance` or an exported `CLERK_SECRET_KEY` are taken as-is. Without one, a human gets a picker of every instance on their account, and an **agent, `--json` or `-y` run exits `2`**, because what the CLI resolves on its own is usually the linked project, which is usually the migration's destination.
 
 The import sets each user's `external_id` to their old Clerk user ID, so an app's own `external_id` moves to `private_metadata.clerkExternalId`. The export warns about it: tell the user anything that looks users up by `external_id` needs updating. A user deleted while the export runs fails the export; run it again.
 
@@ -112,7 +112,7 @@ clerk migrate export workos --api-key sk_… --with-identities
 
 Needs the secret API key — the one starting `sk_`, from the WorkOS dashboard under **API Keys**. WorkOS is API-only, so there is no `--db-url` option. Pagination is cursor-based, so unlike Auth0 there is no user ceiling.
 
-- **No passwords, no TOTP.** WorkOS accepts password hashes on import and never returns them, and returns TOTP secrets only at enrolment. There is no support-request escape hatch. Every password user resets or signs in through SSO. The coverage table always shows `✗ 0/N have a password (WorkOS returns none)`.
+- **No passwords, no TOTP.** WorkOS accepts password hashes on import and never returns them, and returns TOTP secrets only at enrolment. Unlike Auth0, no support request gets them. Every password user resets or signs in through SSO.
 - **`--with-identities` is off by default, and it is not free.** WorkOS has no bulk endpoint for OAuth identities, so it is one extra request per user — 1,000 users means roughly 1,010 requests. Nothing it returns can be imported; it buys an **OAuth providers** block under the coverage table and an `identities` array in the export file. Useful for deciding which social connections to enable in Clerk. Ask before passing it on a large tenant. A human run asks once, defaulting to no; `-y` skips it unless `--with-identities` is passed.
 
 ```
@@ -142,7 +142,7 @@ Find the connection string in the Supabase dashboard under **Connect**:
 
 The export keeps `raw_app_meta_data`. The import's checks read it for each user's providers, and reject users whose only provider is not enabled in Clerk, unless they can sign in by email code, email link or phone code instead.
 
-The source rejects deleted users (`deleted_at` set) and anonymous users with a skip reason, so the dry run lists them and the import needs `--allow-partial` to go ahead without them. A `banned_until` in the future imports as banned, and phones stored as bare digits get a `+`.
+The source skips deleted users (`deleted_at` set) and anonymous users. The dry run lists them as skipped, and the import goes ahead without them. A `banned_until` in the future imports as banned, and phones stored as bare digits get a `+`.
 
 ## Auth.js (NextAuth)
 
@@ -152,7 +152,11 @@ clerk migrate export authjs --db-url "mysql://user:…@127.0.0.1:3306/authjs"
 
 Postgres, MySQL, SQLite and libsql/Turso all work. Auth.js has no single schema — Prisma capitalizes the table, Drizzle does not — so the export tries `next_auth.users` on Postgres (for `@auth/supabase-adapter`), then `User`, `user` and `users`, and reports which it found.
 
-Auth.js core stores no passwords. Those users arrive with no credentials and will sign in through their OAuth provider or a fresh Clerk flow. Credentials-provider passwords live in the app's own tables, which the export does not read, and it warns about them.
+Auth.js core stores no passwords. Those users arrive with no credentials and will sign in through their OAuth provider or a fresh Clerk flow. An app that also uses the Credentials provider stores passwords wherever it chose, which the export does not read, even a password column on the user table. Migrate those separately, or have those users reset their password.
+
+The export also reads the account table (`Account`, `account`, `accounts` or `next_auth.accounts`) for each user's OAuth providers, and keeps them as `providers`. The import's checks count them and offer to turn on any provider Clerk has off.
+
+**Auth.js leaves an OAuth user's email unverified** (`emailVerified: null`; only an email-link sign-up gets a date). Imported as is, that user is rejected by an instance that requires an email. On one that doesn't, Clerk won't link their social sign-in to the unverified address, and it creates a second user. The export counts these users and warns. `--trust-oauth-emails` marks them verified, dated at the export. Ask the user before passing it, and recommend it only when every provider the app uses verifies addresses: a provider that never verified one lets whoever holds the address claim the account. Without an account table, the export can't tell who signs in with OAuth.
 
 ## Better Auth
 
@@ -161,7 +165,7 @@ clerk migrate export betterauth --db-url "./db.sqlite"
 clerk migrate export betterauth --db-url "libsql://app-org.turso.io?authToken=…"   # or set TURSO_AUTH_TOKEN
 ```
 
-Plugin columns are detected from the live schema rather than assumed, because selecting a column that is not there fails the whole query. Username, admin (`banned`), phone-number and the rest come across when the plugin is installed. A ban carries only while `banExpires` is unset or in the future. Anonymous-plugin users are rejected with a skip reason, so the import needs `--allow-partial` to go ahead without them.
+Plugin columns are detected from the live schema rather than assumed, because selecting a column that is not there fails the whole query. Username, admin (`banned`), phone-number and the rest come across when the plugin is installed. A ban carries only while `banExpires` is unset or in the future. Anonymous-plugin users are skipped. The dry run lists them, and the import goes ahead without them.
 
 Passwords come from a `LEFT JOIN` onto the credential `account` row — left, so a user who only ever signed in with OAuth is still exported. The import detects the hasher per user: Better Auth's own scrypt, bcrypt and argon2 come across, and any other hash is dropped. A user with two credential rows whose hashes differ is exported without a password. See [sources.md](sources.md#better-auth-passwords) for the NFKC caveat.
 
@@ -177,7 +181,7 @@ Connection strings are redacted in every message the CLI prints (`postgres://***
 clerk migrate export firebase --service-account ./service-account.json
 ```
 
-Needs a service account key with the Firebase Authentication Admin role (or Viewer plus the `firebaseauth.configs.getHashConfig` permission): Firebase console → Project settings → Service accounts → Generate new private key. `--service-account` takes a path or the key's JSON. Without it, a human is prompted — the answer can be a path **or the key's JSON pasted whole**, so a key kept in a password manager never has to touch disk. Agent mode names the flag instead. The key is validated before any network call, so downloading the web app config by mistake fails immediately and names the right console page.
+Needs a service account key with the Firebase Authentication Admin role (or Viewer plus the `firebaseauth.configs.getHashConfig` permission): Firebase console → Project settings → Service accounts → Generate new private key. `--service-account` takes a path or the key's JSON. Without it, a human is prompted — the answer can be a path **or the key's JSON pasted whole**, so a key kept in a password manager never has to touch disk. Agent mode names the flag instead. When the user pastes the key's JSON, pass it whole as `--service-account '<json>'`, or write it to a temp file outside the project, pass that path, and delete the file after the export. Never save it inside the project. The key is validated before any network call, so downloading the web app config by mistake fails immediately and names the right console page.
 
 **Firebase's scrypt is a modified variant.** A digest is worthless without the project's four hash parameters. The export reads them from the project and saves them in the envelope, so the import needs no `--firebase-*` flags:
 

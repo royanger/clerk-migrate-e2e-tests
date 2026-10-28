@@ -1,6 +1,6 @@
 # Import checks
 
-Every `clerk migrate import` runs its checks against the destination instance before writing anything. `--dry-run` stops after them. The checks sort users three ways.
+Every `clerk migrate import` runs its checks against the destination instance before writing anything. `--dry-run` stops after them. The checks sort users four ways.
 
 ```
 Checks
@@ -18,28 +18,31 @@ Or change the instance instead
     clerk config patch --app app_… --instance ins_… --json '{"auth_email":{"required_for_sign_up":false}}'
 ```
 
+## Skipped by the source
+
+Users their source asked to leave out: Supabase's deleted and anonymous users, Better Auth's anonymous users, Firebase users with no email or phone, and any user a custom source gives a `skipReason`. The checks print them as `- N users skipped, as the source asked`, with a count per reason. They never stop the import and need no `--allow-partial`. `--json` lists them as `checks.skipped`, and the run records each as `skipped` with `code: "source_skip"`.
+
 ## Rejected
 
 Users Clerk would refuse. Each gets the first reason that applies, in this order:
 
 1. It failed schema validation (`invalid: …`): no identifier at all, or an unknown password hasher.
-2. The source set `skipReason`.
-3. It has only emails Clerk refuses (malformed, or a domain such as `.local` that can't receive mail), or only phones not in E.164 form while numeric usernames are on.
-4. It lacks an identifier the instance requires. An email or phone counts only when it is **verified**, or reserved with `--reserve-unverified`: an unverified-only email does not satisfy a required email, because Clerk attaches unverified identifiers after the user exists.
-5. It has no identifier the instance accepts, once the turned-off ones are removed.
-6. It lacks a first or last name the instance requires.
-7. It has TOTP or backup codes, and the instance has them off.
-8. It has no password, and a password is the instance's only way to sign in.
-9. It has no legal acceptance, and the instance requires it. `--skip-legal-checks` imports them without it.
-10. Its username breaks the instance's rules (length, no letters, special characters).
-11. Its password does not match the shape its hasher names. The CLI checks `bcrypt`, `scrypt_firebase`, `argon2i`/`argon2id` and `scrypt_werkzeug`.
-12. Supabase only: its only provider is not enabled in Clerk (or Clerk doesn't offer it), and it has no verified or reserved email or phone that can sign in by code or link instead.
+2. It has only emails Clerk refuses (malformed, or a domain such as `.local` that can't receive mail), or only phones not in E.164 form while numeric usernames are on.
+3. It lacks an identifier the instance requires. An email or phone counts only when it is **verified**, or reserved with `--reserve-unverified`: an unverified-only email does not satisfy a required email, because Clerk attaches unverified identifiers after the user exists.
+4. It has no identifier the instance accepts, once the turned-off ones are removed.
+5. It lacks a first or last name the instance requires.
+6. It has TOTP or backup codes, and the instance has them off.
+7. It has no password, and a password is the instance's only way to sign in.
+8. It has no legal acceptance, and the instance requires it. `--skip-legal-checks` imports them without it.
+9. Its username breaks the instance's rules (length, no letters, special characters).
+10. Its password does not match the shape its hasher names. The CLI checks `bcrypt`, `scrypt_firebase`, `argon2i`/`argon2id` and `scrypt_werkzeug`.
+11. Supabase only: its only provider is not enabled in Clerk (or Clerk doesn't offer it), and it has no verified or reserved email or phone that can sign in by code or link instead.
 
 Users who pass all of those are then checked against each other and the instance:
 
-13. Its source ID, email, phone or username repeats an earlier user in the file, or a user an earlier attempt of this run already created.
-14. The instance already has a user with its source ID, email, phone or username. Users a continued run created do not count.
-15. Development instances only: it falls past the user-limit headroom, counted in file order.
+12. Its source ID, email, phone or username repeats an earlier user in the file, or a user an earlier attempt of this run already created.
+13. The instance already has a user with its source ID, email, phone or username. Users a continued run created do not count.
+14. Development instances only: it falls past the user-limit headroom, counted in file order.
 
 Any reject stops the import with exit `2`, and the CLI prints the same command with `--allow-partial` added. With `--allow-partial`, the rest import and each reject is recorded in the run as `skipped` with its reason.
 
@@ -58,7 +61,7 @@ Warnings, not rejects:
 
 ## The `clerk config patch` fixes
 
-When a check traces back to an instance setting, the CLI prints a `clerk config patch …` command for each fix under **Or change the instance instead** (a Dashboard link instead when Clerk did not confirm the instance, and an `--app APP_ID` placeholder when no app is known). It never applies them. Treat each as an offer: an instance that requires an email may be set up the way its owner wants, and fixing the export may be the right answer. Ask the user before running any of them.
+When a check traces back to an instance setting, the CLI prints a `clerk config patch …` command for each fix under **Or change the instance instead** (a Dashboard link instead when Clerk did not confirm the instance, and an `--app APP_ID` placeholder when no app is known: ask the user which app owns the instance and fill in its ID, never a guess). It never applies them. Treat each as an offer: an instance that requires an email may be set up the way its owner wants, and fixing the export may be the right answer. Ask the user before running any of them.
 
 If the CLI cannot read the instance settings, it skips the required-field checks and says so. "Could not read" is not "switched off"; tell the user which one applies.
 
@@ -66,7 +69,9 @@ If the CLI cannot read the instance settings, it skips the required-field checks
 
 `--require-password` leaves users without a password digest out of the import. The run records each as `skipped` with the reason `no password (--require-password)`, `import --json` counts them as `withoutPassword`, and a continued run does not retry them.
 
-An unrecognized password hasher rejects that user as `invalid: Unknown password hasher "…"`, and the message lists every hasher the CLI accepts. Like any reject, it stops the import unless `--allow-partial` is passed.
+Pass it only when the user asks to leave out the users who have no password. An instance that requires a password still accepts imported users without one: the import sends them with `skip_password_requirement`, and they set a password when they reset it. "Passwords are required" describes the instance setting. It is not a request to skip anyone, and "they can reset their passwords" means import them.
+
+An unrecognized password hasher rejects that user as `invalid: Unknown password hasher "…"`, and the message lists every hasher the CLI accepts.
 
 ## Development-instance limit
 
