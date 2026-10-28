@@ -7,5 +7,9 @@
   "identifiers": "Which field is the user's stable ID, and which fields hold usernames, logins or alternate contacts.",
   "names": "How first and last names are stored.",
   "status": "Banned, locked, disabled, suspended or deleted users, and which users should not be imported.",
-  "dates": "How creation timestamps are stored: format, unit and timezone."
+  "dates": "How creation timestamps are stored: format, unit and timezone.",
+  "source-file": "Whether the agent may create the custom source file, and where to put it.",
+  "legal-consent": "Whether the Clerk instance requires legal consent, and whether to import with --skip-legal-checks.",
+  "target": "Which Clerk instance (development or production) the users go into, and whether it already has real users.",
+  "reserve": "Only a question that asks about reserving identifiers or the --reserve-unverified flag. Not how the export marks verification, or whether a field without its own flag counts as verified."
 }

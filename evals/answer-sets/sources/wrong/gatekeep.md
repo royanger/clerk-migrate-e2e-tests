@@ -24,3 +24,6 @@ In `attrs`, `plan`, `locale` and `theme` are shown in the app. `stripe_customer`
 
 ## dates (correct)
 `ts_created` is milliseconds.
+
+## source-file (correct)
+Yes, create `gatekeep-source.ts` in this project folder, next to the export.

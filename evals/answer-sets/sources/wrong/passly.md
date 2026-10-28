@@ -24,3 +24,6 @@ The JSON has the users under a `users` key. The CSV has a header row.
 
 ## dates (correct)
 `createdAt` is Unix seconds.
+
+## source-file (correct)
+Yes, create `passly-source.ts` in this project folder, next to the export.

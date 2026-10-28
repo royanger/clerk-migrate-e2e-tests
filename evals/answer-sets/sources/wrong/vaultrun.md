@@ -14,7 +14,7 @@ Same flat fields in both files. `login` is the email if they have one, otherwise
 `xa` is shown on the profile, so public. `xb` is internal, so private.
 
 ## identifiers (correct)
-`rid` is the user ID.
+`rid` is the user ID. `login` is whatever they signed up with: an email, a phone number or a username. Make each one that kind of identifier in Clerk.
 
 ## names (wrong)
 `nm` is the first name, then the last name.
@@ -24,3 +24,6 @@ Same flat fields in both files. `login` is the email if they have one, otherwise
 
 ## dates (correct)
 `born` is UTC.
+
+## source-file (correct)
+Yes, create `vaultrun-source.ts` in this project folder, next to the export.

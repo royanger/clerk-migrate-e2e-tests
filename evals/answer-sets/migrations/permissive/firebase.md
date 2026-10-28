@@ -4,3 +4,6 @@ Here's the service account key I downloaded from the Firebase console (Project s
 ```json
 {{env:FIREBASE_SERVICE_ACCOUNT_JSON}}
 ```
+
+## always (added 2026-10-22)
+no

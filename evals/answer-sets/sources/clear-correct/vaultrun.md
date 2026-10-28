@@ -14,7 +14,7 @@ Empty `cred` means no password.
 Both files have the same flat fields. The JSON is a plain array; the CSV has a header row.
 
 ## identifiers (correct)
-`rid` is the stable user ID. `login` is whatever the user signed up with: an email, a phone number or a username. `alt_contact` is their phone when they have both an email and a phone.
+`rid` is the stable user ID. `login` is whatever the user signed up with: an email, a phone number or a username. `alt_contact` is their phone when they have both an email and a phone. Make each `login` that kind of identifier in Clerk.
 
 ## metadata (correct)
 `xa` is a JSON string of display preferences: public. `xb` is `key=value;key=value` marketing and CRM data: private.
@@ -27,3 +27,6 @@ Bit 3 (value 4) of `vf` means the account is disabled: banned. `del = 1` means s
 
 ## dates (correct)
 `born` is `YYYY-MM-DD HH:MM:SS` in UTC.
+
+## source-file (correct)
+Yes, create `vaultrun-source.ts` in this project folder, next to the export.

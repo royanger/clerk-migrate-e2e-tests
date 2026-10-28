@@ -24,3 +24,6 @@ yes, if you think this is a username.
 
 ## dates (correct)
 `joined` is local time with the offset on it. Our servers are in Berlin.
+
+## source-file (correct)
+Yes, create `frostline-source.ts` in this project folder, next to the export.

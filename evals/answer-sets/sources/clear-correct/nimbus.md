@@ -28,3 +28,6 @@ The JSON is a plain array of user objects. The CSV has a header row with the sam
 
 ## dates (correct)
 `ctime` is a Unix timestamp in seconds, stored as a string.
+
+## source-file (correct)
+Yes, create `nimbus-source.ts` in this project folder, next to the export.

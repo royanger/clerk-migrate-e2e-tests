@@ -27,3 +27,6 @@ yes
 
 ## late (correct)
 One change after all: keep the deleted users (`del = 1`). Import them, but banned, instead of leaving them out.
+
+## source-file (correct)
+Yes, create `vaultrun-source.ts` in this project folder, next to the export.

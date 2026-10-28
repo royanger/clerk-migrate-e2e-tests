@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 7,
   "description": "Importing an export file under email and password required (D2). The customer keeps the settings, skips users who don't pass, and wants the emails and phone numbers the export never verified reserved, so those users can still sign in with them.",
   "fallback": "ask-human",
   "dest": "D2",

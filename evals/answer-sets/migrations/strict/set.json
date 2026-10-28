@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 9,
   "description": "Export from the provider, then import, with email and password required (D2): the customer keeps the settings and skips the users who fail them.",
   "fallback": "ask-human",
   "dest": "D2",

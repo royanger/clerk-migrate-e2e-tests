@@ -27,3 +27,6 @@ The JSON is `{ "result": { "members": [...] }, "next_cursor": null }`, all on on
 
 ## dates (correct)
 `joined` is ISO 8601 with its UTC offset, e.g. `+02:00`.
+
+## source-file (correct)
+Yes, create `frostline-source.ts` in this project folder, next to the export.

@@ -24,3 +24,6 @@ Enable usernames
 
 ## dates (correct)
 `createdAt` is Unix seconds.
+
+## source-file (correct)
+Yes, create `passly-source.ts` in this project folder, next to the export.

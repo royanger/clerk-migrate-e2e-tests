@@ -3,13 +3,18 @@
   "who-runs": "Whether the agent runs the import command itself, or hands the command to the customer to run.",
   "rejects": "What to do about users the dry run rejects: fix the export, change the instance's settings, or import the rest and skip them.",
   "settings-change": "Whether the agent may change the Clerk instance's settings, such as with clerk config patch.",
-  "target": "Which Clerk application or instance (development or production) to import into.",
-  "source": "Which platform the export came from, or which source to import it with.",
+  "target": "Which Clerk application or instance (development or production) to import into: the destination, not the one the users come from.",
+  "source": "Which platform the export came from, or which source to import it with. For a move from another Clerk application, which application and instance (development or production) the users come from.",
   "passwords": "Users arriving without passwords, or with passwords Clerk cannot verify, who will need to reset them.",
   "social": "Social or OAuth sign-ins, which are not carried over.",
   "cleanup": "Deleting the run folders or export files the import leaves behind.",
   "summary": "Confirming the agent's summary of what will be imported and what will not carry over.",
   "credentials": "The keys, client secrets, connection strings, auth tokens or service-account files needed to read users from the source platform.",
   "export-options": "Optional extras when exporting from the source platform, such as also exporting OAuth identities.",
-  "clerk-key": "The Clerk secret key, API key or login for the destination Clerk instance."
+  "clerk-key": "The Clerk secret key, API key or login for the destination Clerk instance.",
+  "verification": "Whether emails or phone numbers the export does not mark as verified are imported as verified, unverified, or reserved (--reserve-unverified).",
+  "sample-emails": "Email addresses on reserved or sample domains (example.com, example.net, example.org) that can't receive mail: import them as they are, drop them, or change them.",
+  "names": "A name field that holds something other than a person's name, such as an email, a phone number or a username: keep it, blank it, or move it.",
+  "conversion": "Whether to turn a field into a different sign-in identifier: a placeholder email such as <digits>@phone.local into a phone number, a name into a username, or a metadata key into a phone number or username.",
+  "metadata": "Where the export's metadata or extra fields go in Clerk, including fields the built-in source does not carry over."
 }

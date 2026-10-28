@@ -71,7 +71,7 @@ Their `set.json` also says which Clerk settings every run with the set uses:
   emails and phones the export never verified (`## verification (reserved)`).
   The grade then wants every unverified one reserved; without it, none.
 
-Their golden answer keys (`pnpm eval:imports:golden`) are filed by these
+Their golden answer keys (`pnpm eval:setup:golden`) are filed by these
 settings (`data/provider-exports/golden/D2-partial/`, or `D2-partial-reserved/`
 with `reserveUnverified`), so a set in either eval with the same settings
 shares a key; a set with new settings needs a new build. A key built before

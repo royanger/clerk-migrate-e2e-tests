@@ -27,3 +27,6 @@ The `locked` flag means banned. `beta` means nothing for the import.
 
 ## dates (correct)
 `ts_created` is a Unix timestamp in milliseconds.
+
+## source-file (correct)
+Yes, create `gatekeep-source.ts` in this project folder, next to the export.

@@ -24,3 +24,6 @@ The three metadata columns go into the Clerk fields with the same names.
 
 ## dates (correct)
 `created_at` is UTC.
+
+## source-file (correct)
+Yes, create `keyhole-source.ts` in this project folder, next to the export.

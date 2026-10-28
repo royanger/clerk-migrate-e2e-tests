@@ -24,3 +24,6 @@ We only keep `displayName`, as "First Last". A single word is a first name only.
 
 ## dates (correct)
 `createdAt` is a Unix timestamp in seconds.
+
+## source-file (correct)
+Yes, create `passly-source.ts` in this project folder, next to the export.

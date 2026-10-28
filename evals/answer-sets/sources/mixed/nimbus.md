@@ -24,3 +24,9 @@ It's just whatever they typed in `name`.
 
 ## dates (correct)
 `ctime` is Unix seconds.
+
+## source-file (correct)
+Yes, create `nimbus-source.ts` in this project folder, next to the export.
+
+## always (added 2026-10-27)
+nimbus

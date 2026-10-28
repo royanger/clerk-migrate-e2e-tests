@@ -24,3 +24,6 @@ In `props`, `plan` and `lang` are shown in the app. `ref` and `acct_note` are fo
 
 ## dates (correct)
 `ctime` is Unix seconds.
+
+## source-file (correct)
+Yes, create `nimbus-source.ts` in this project folder, next to the export.

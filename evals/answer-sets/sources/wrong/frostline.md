@@ -24,3 +24,6 @@ In the JSON the members are under `result.members`, all on one page. The CSV has
 
 ## dates (correct)
 `joined` is local time with the offset on it.
+
+## source-file (correct)
+Yes, create `frostline-source.ts` in this project folder, next to the export.

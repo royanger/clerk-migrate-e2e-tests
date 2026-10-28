@@ -24,3 +24,6 @@ They mean the same as Clerk's: `public_metadata` → public, `private_metadata` 
 
 ## names (correct)
 `first_name` and `last_name`. Either can be null.
+
+## source-file (correct)
+Yes, create `keyhole-source.ts` in this project folder, next to the export.

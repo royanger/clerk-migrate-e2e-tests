@@ -27,3 +27,6 @@ yes
 
 ## names (correct)
 `person.given` and `person.family`. Some people only gave one.
+
+## source-file (correct)
+Yes, create `gatekeep-source.ts` in this project folder, next to the export.

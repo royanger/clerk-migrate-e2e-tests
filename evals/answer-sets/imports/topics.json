@@ -11,5 +11,7 @@
   "summary": "Confirming the agent's summary of what will be imported and what will not carry over, including a long plan or status update that ends with a question.",
   "names": "A name field that holds something other than a person's name, such as an email, a phone number or a username: keep it, blank it, or move it.",
   "verification": "Whether emails or phone numbers the export does not mark as verified are imported as verified, unverified, or reserved (--reserve-unverified).",
-  "metadata": "Where the export's metadata or extra fields go in Clerk (public, private or unsafe metadata), or whether to turn any of them into usernames or phone numbers."
+  "metadata": "Where the export's metadata or extra fields go in Clerk (public, private or unsafe metadata).",
+  "sample-emails": "Email addresses on reserved or sample domains (example.com, example.net, example.org) that can't receive mail: import them as they are, drop them, or change them.",
+  "conversion": "Whether to turn a field into a different sign-in identifier: a placeholder email such as <digits>@phone.local into a phone number, a name into a username, or a metadata key into a phone number or username."
 }

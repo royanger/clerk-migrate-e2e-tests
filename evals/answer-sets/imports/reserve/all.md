@@ -8,16 +8,16 @@ Please run it yourself.
 Yes, understood.
 
 ## rejects (allow-partial)
-Keep the settings as they are. Import everyone who passes and skip the users who don't; we'll deal with them separately.
+Keep the settings as they are. Leave out the users who don't pass; we'll deal with them separately.
 
 ## settings-change (no)
-No. Email and a password are required on purpose. Don't change the instance's settings.
+No. The instance requires an email and a password at sign-up on purpose. Don't change its settings.
 
 ## target (dev)
 Yes, the development instance the CLI is already pointed at.
 
 ## passwords (ok)
-That's fine, they can reset their passwords.
+If a password can't be carried over, that's fine: import the user anyway and they can reset it.
 
 ## social (ok)
 That's fine, we'll set up the social providers in Clerk later.
@@ -35,4 +35,10 @@ Keep the names the way the export has them. Don't rewrite or blank any.
 Only what the export marks as verified is verified. Reserve the rest: keep them unverified, but let each user sign in with them and keep anyone else from claiming them.
 
 ## metadata (default)
-Keep the metadata where the import puts it by default. Don't turn any of it into usernames or phone numbers.
+Keep the metadata where the import puts it by default. Don't turn any of it into usernames or phone numbers. Leave out what the built-in source doesn't carry over, and don't write a custom source just to bring extra fields across.
+
+## sample-emails (import)
+Those are our test accounts, and those addresses are what they sign in with. Import them exactly as they are; don't drop or change any. Nobody needs to get mail at them.
+
+## conversion (no)
+No. Keep them as they are in the export, and leave out the ones Clerk rejects.
