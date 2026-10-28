@@ -11,7 +11,7 @@
  *   --agent-cli <level>     what the agent's `clerk` may run: none (default), sources, dry-run
  *   -a, --agent <a[,b]>     claude, codex, or both comma-separated (default: both, Claude first)
  *   --exports <a,b>         default: all 8
- *   --prompt-dir <dir>      prompts other than evals/prompts (e.g. evals/prompts-first-person)
+ *   --prompt-dir <dir>      prompts other than evals/prompts-first-person (e.g. evals/prompts)
  *   --no-sync               test evals/skill as it is, not synced from skillSource
  *
  * First, prepare.ts: skill sync and eval:ready.

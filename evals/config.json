@@ -1,7 +1,7 @@
 {
   "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli-final-slice/packages/cli-core/src/cli.ts",
   "skillSource": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/skills/skills/clerk-migrate/",
-  "prompts": "evals/prompts",
+  "prompts": "evals/prompts-first-person",
   "agents": {
     "claude": {
       "model": "opus",

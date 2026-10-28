@@ -161,7 +161,7 @@ Each eval prepares itself first (`scripts/eval/prepare.ts`):
 | `--provider <a[,b]>` | `-p` | imports, migrations, golden, provider-exports | which providers (default all seven) |
 | `--exports <a,b>` | | sources | which made-up exports (default all 8) |
 | `--agent-cli <level>` | | sources | what the agent's `clerk` may run: `none` (default), `sources`, `dry-run` |
-| `--prompt-dir <dir>` | | all three | prompts other than `evals/prompts/` |
+| `--prompt-dir <dir>` | | all three | prompts other than `evals/prompts-first-person/` (`evals/prompts` for the third-person ones) |
 
 `-a` means `--app` to teardown and `--agent` to the evals, and `-p` means
 `--provider` everywhere except teardown. No script takes both meanings.
@@ -630,7 +630,7 @@ pnpm eval:setup:native-exports                  # auth0, firebase, supabase
 pnpm eval:setup:native-exports -p clerk         # seeds the source app; then export from the Dashboard
 pnpm eval:setup:native-exports -p clerk --done  # records your download, restores the source
 pnpm eval:setup:golden --native
-pnpm eval:imports --native --prompt-dir evals/prompts-first-person
+pnpm eval:imports --native
 ```
 
 Neither step runs on its own before a batch: the Clerk file needs you.
@@ -686,8 +686,10 @@ Clerk settings), `all.md` for every provider, and `<provider>.md` overrides.
 
 ### Prompts
 
-`evals/prompts/` holds each eval's first user message (`<eval>.user.md`) and
-any text added to the agent's system prompt (`<eval>.system.md`). The runner
+`evals/prompts-first-person/` (the default) holds each eval's first user message
+(`<eval>.user.md`), written as the customer, and any text added to the agent's
+system prompt (`<eval>.system.md`). `evals/prompts/` has the older third-person
+versions; pass `--prompt-dir evals/prompts` to use them. The runner
 fills `{{provider}}`, `{{file}}`, `{{cliAccess}}` and `{{sessionRules}}` per
 run, and stops on a placeholder it doesn't know. `--prompt-dir` swaps in another
 folder; each result records a hash of the prompts it used.
@@ -1014,7 +1016,8 @@ evals/config.json                    CLI, skill source, prompts folder, models a
 evals/targets.json                   the Clerk instances: pool, source, migrate
 evals/skill/                         the saved copy of the clerk-migrate skill
 evals/answer-sets/                   answers per eval: sources/, imports/, migrations/
-evals/prompts/                       what each eval tells the agent
+evals/prompts-first-person/          what each eval tells the agent (default)
+evals/prompts/                       the older third-person prompts (--prompt-dir evals/prompts)
 data/custom-sources/                 the 8 made-up exports
 data/custom-sources-answers/         their answer keys and reference sources
 data/users-eval.json                 the 50 eval users

@@ -8,7 +8,7 @@
  *   --set <a[,b]>           import answer sets (default: all of them, e.g. permissive, strict)
  *   -a, --agent <a[,b]>     claude, codex (default: both, Claude first)
  *   -p, --provider <a[,b]>  default: all seven
- *   --prompt-dir <dir>      prompts other than evals/prompts (e.g. evals/prompts-first-person)
+ *   --prompt-dir <dir>      prompts other than evals/prompts-first-person (e.g. evals/prompts)
  *   --native                the provider's own export (native-exports.ts) instead of `clerk migrate export`'s,
  *                           with the imports-native sets; -p takes auth0 firebase firebase-csv supabase clerk
  *   --no-sync               test evals/skill as it is, not synced from skillSource

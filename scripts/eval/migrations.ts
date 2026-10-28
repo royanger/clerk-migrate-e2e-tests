@@ -9,7 +9,7 @@
  *   --set <a[,b]>           import answer sets (default: all); they also hold each provider's credentials
  *   -a, --agent <a[,b]>     claude, codex (default: both, Claude first)
  *   -p, --provider <a[,b]>  default: all seven (Clerk needs the source instance in evals/targets.json)
- *   --prompt-dir <dir>      prompts other than evals/prompts
+ *   --prompt-dir <dir>      prompts other than evals/prompts-first-person (e.g. evals/prompts)
  *   --no-sync               test evals/skill as it is, not synced from skillSource
  *
  * First, prepare.ts: skill sync, eval:ready, and any missing export or missing/stale golden key.
