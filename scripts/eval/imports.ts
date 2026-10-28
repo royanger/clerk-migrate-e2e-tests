@@ -2,12 +2,16 @@
  * Eval: given only the clerk-migrate skill and a provider's export, does the
  * agent import the users correctly, and follow the skill's import flow?
  *
- *   pnpm eval:ready && pnpm eval:imports -a claude
+ *   pnpm eval:imports -a claude
  *   pnpm eval:imports --set strict -a codex -p firebase,supabase
  *
  *   --set <a[,b]>           import answer sets (default: all of them, e.g. permissive, strict)
  *   -a, --agent <a[,b]>     claude, codex (default: both, Claude first)
  *   -p, --provider <a[,b]>  default: all seven
+ *   --prompt-dir <dir>      prompts other than evals/prompts (e.g. evals/prompts-first-person)
+ *   --native                the provider's own export (native-exports.ts) instead of `clerk migrate export`'s,
+ *                           with the imports-native sets; -p takes auth0 firebase firebase-csv supabase clerk
+ *   --no-sync               test evals/skill as it is, not synced from skillSource
  *
  * Per run (set × agent × provider), on a Clerk target claimed from the pool
  * (evals/targets.json; it waits for a free one), emptied and set to the answer
@@ -17,34 +21,41 @@
  *   imported is graded against the golden key → process checks from the shim's
  *   log of every `clerk` call → every user deleted.
  *
- * Inputs: pnpm eval:provider-exports, then pnpm eval:imports:golden.
+ * First, prepare.ts: skill sync, eval:ready, and any missing export or missing/stale golden key.
  * Writes evals/runs/<stamp>-imports/{summary.md, summary.json, <set>/<agent>/<provider>/…}.
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
-import { value } from "../lib/args";
+import { extname, join, relative, resolve } from "node:path";
+import { flag, value } from "../lib/args";
 import { clerkRun, cliVersion, pinCli, SetupError } from "../lib/clerk-run";
 import { claimTarget, targetArgs } from "../lib/targets";
 import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import { deleteAllUsers } from "../lib/clerk-source";
 import { grade, section, type Grade } from "../lib/grade";
-import { claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
+import { agentRuns, claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
 import { processChecks, type Check } from "./process-checks";
 import { envRefs, listSets, loadSet, loadTopics, setsDir, type AnswerSet } from "./answers";
 import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 import { goldenFile, settingsOf, runUsers, sha256, type GoldenKey } from "./golden";
+import { firebaseHashEnv, FIREBASE_HASH_CONFIG, nativeFile, nativeStale, NATIVE_EXPORTS } from "./native-exports";
 import { exportFile, PROVIDER_EXPORTS, PROVIDER_NAMES } from "./provider-exports";
+import { prepare } from "./prepare";
 import { loadPrompts } from "./prompts";
-import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type Answerer, type QA } from "./session";
+import { answerer, contamination, counts, minutes, qaMarkdown, runSession, waited, type Answerer, type QA } from "./session";
 
-const SETS = setsDir("imports");
-const PROVIDERS = Object.keys(PROVIDER_EXPORTS);
+const native = flag("native");
+const SETS = setsDir(native ? "imports-native" : "imports");
+// With --native, a "provider" is one native export (firebase and firebase-csv are both Firebase).
+const PROVIDERS = Object.keys(native ? NATIVE_EXPORTS : PROVIDER_EXPORTS);
+const inputFile = (p: string) => (native ? nativeFile(p) : exportFile(p));
+const goldenName = (p: string) => (native ? `native/${p}` : p);
+const platformName = (p: string) => PROVIDER_NAMES[native ? NATIVE_EXPORTS[p].provider : p];
 const MARKERS = ["provider-exports", "golden", "answer-sets", "evals/runs", "users-eval.json"];
 
 // ── arguments ──
 
-const usage = "Usage: pnpm eval:imports [--set permissive,strict] [-a claude|codex] [-p auth0,firebase]";
+const usage = "Usage: pnpm eval:imports [--set permissive,strict] [-a claude|codex] [-p auth0,firebase] [--prompt-dir <dir>] [--native] [--no-sync]";
 const setNames = value("set")?.split(",") ?? listSets(SETS);
 const agents = (value("agents")?.split(",") ?? AGENTS) as AgentName[];
 const providers = value("provider")?.split(",") ?? PROVIDERS;
@@ -52,8 +63,6 @@ const bad = [
   ...setNames.filter((s) => !listSets(SETS).includes(s)).map((s) => `unknown set "${s}" (have ${listSets(SETS).join(", ")})`),
   ...agents.filter((a) => !AGENTS.includes(a)).map((a) => `unknown agent "${a}"`),
   ...providers.filter((p) => !PROVIDERS.includes(p)).map((p) => `unknown provider "${p}" (have ${PROVIDERS.join(" ")})`),
-  ...providers.filter((p) => !existsSync(exportFile(p))).map((p) => `no export for ${p}: run pnpm eval:provider-exports -p ${p}`),
-  ...setNames.filter((s) => listSets(SETS).includes(s)).flatMap((s) => providers.filter((p) => !existsSync(goldenFile(settingsOf(loadSet(s, SETS)), p))).map((p) => `no golden key for ${s}/${p}: run pnpm eval:imports:golden -p ${p}`)),
 ];
 if (bad.length) {
   console.error(`${bad.join("\n")}\n${usage}`);
@@ -62,14 +71,37 @@ if (bad.length) {
 
 const cfg = loadConfig();
 const topics = loadTopics(SETS);
+// The Firebase answers give the console's hash parameters, which the native export kept beside the file.
+if (native && existsSync(FIREBASE_HASH_CONFIG)) {
+  const h = firebaseHashEnv();
+  Object.assign(process.env, {
+    FIREBASE_HASH_SIGNER_KEY: h.CLERK_FIREBASE_SIGNER_KEY, FIREBASE_HASH_SALT_SEPARATOR: h.CLERK_FIREBASE_SALT_SEPARATOR,
+    FIREBASE_HASH_ROUNDS: h.CLERK_FIREBASE_ROUNDS, FIREBASE_HASH_MEM_COST: h.CLERK_FIREBASE_MEM_COST,
+  });
+}
 const missingEnv = setNames.flatMap((n) => envRefs(loadSet(n, SETS), providers)).filter((v) => process.env[v] === undefined);
 if (missingEnv.length) {
   console.error(`Answers need ${[...new Set(missingEnv)].join(", ")}, not set: run through op (pnpm eval:imports does) and check op.env`);
   process.exit(2);
 }
+if (native) {
+  // Native exports aren't made or keyed automatically: the Clerk one is a Dashboard download.
+  await prepare(agents);
+  const settings = [...new Set(setNames.map((n) => settingsOf(loadSet(n, SETS))))];
+  const missing = [
+    ...providers.filter((p) => !existsSync(nativeFile(p))).map((p) => `no ${nativeFile(p)}: run pnpm eval:setup:native-exports -p ${NATIVE_EXPORTS[p].provider}`),
+    ...providers.filter((p) => existsSync(nativeFile(p)) && settings.some((s) => !existsSync(goldenFile(s, goldenName(p)))))
+      .map((p) => `no golden key for ${p}: run pnpm eval:setup:golden --native -p ${p}`),
+  ];
+  if (missing.length) {
+    console.error(missing.join("\n"));
+    process.exit(2);
+  }
+  for (const p of providers.filter(nativeStale)) console.log(`⚠ ${nativeFile(p)} was made from other eval users or another variation`);
+} else await prepare(agents, { providers, settings: setNames.map((n) => settingsOf(loadSet(n, SETS))) });
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
-const batchDir = resolve("evals/runs", `${stamp}-imports`);
+const batchDir = resolve("evals/runs", `${stamp}-imports${native ? "-native" : ""}`);
 mkdirSync(batchDir, { recursive: true });
 // Every run in the batch is graded on this one build, whatever happens to the checkout meanwhile.
 cfg.cli = pinCli(cfg.cli, join(batchDir, "cli"));
@@ -103,31 +135,18 @@ type Result = {
   target?: string;
 };
 
-/** The agent's own import runs, from the CLI's run store in its workspace. */
-function agentRuns(wsDir: string): { id: string; kind: string; created: number; dir: string }[] {
-  const store = join(wsDir, ".clerk", "migrate");
-  if (!existsSync(store)) return [];
-  return readdirSync(store)
-    .filter((id) => existsSync(join(store, id, "run.json")))
-    .map((id) => {
-      const run = JSON.parse(readFileSync(join(store, id, "run.json"), "utf8"));
-      return { id, kind: run.kind as string, created: Number(run.counts?.created ?? 0), dir: join(store, id) };
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-}
-
 async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provider: string): Promise<Result> {
   const dir = join(batchDir, set.name, agent, provider);
   mkdirSync(dir, { recursive: true });
   const { model, effort } = cfg.agents[agent];
-  const golden = JSON.parse(readFileSync(goldenFile(settingsOf(set), provider), "utf8")) as GoldenKey;
+  const golden = JSON.parse(readFileSync(goldenFile(settingsOf(set), goldenName(provider)), "utf8")) as GoldenKey;
   const result: Result = {
     set: set.name, agent, provider, model, effort, status: "error", rounds: 0, seconds: 0, qa: [], issues: [],
     checks: [], calls: [], importRuns: [], contaminated: [], setVersion: answers.set.version, goldenWarnings: [],
   };
   const version = cliVersion(cfg.cli);
   if (golden.cliVersion !== version) result.goldenWarnings.push(`golden key made with CLI ${golden.cliVersion}, now ${version}`);
-  if (golden.exportSha !== sha256(exportFile(provider))) result.goldenWarnings.push("the export changed since the golden key was made");
+  if (golden.exportSha !== sha256(inputFile(provider))) result.goldenWarnings.push("the export changed since the golden key was made");
 
   const root = mkdtempSync(join(tmpdir(), `eval-import-${agent}-${provider}-`));
   const transcript = join(dir, "transcript.jsonl");
@@ -144,9 +163,10 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     if (existing) await deleteAllUsers(clerk.clerk);
     await clerk.patchConfig(targetArgs(claim.target), withBaseline(DESTS[set.meta.dest as DestId]));
 
-    copyFileSync(exportFile(provider), join(root, "users-export.json"));
-    const ws = createWorkspace(root, agent, cfg, [join(root, "users-export.json")], "import", claim.target);
-    const vars = { file: "users-export.json", provider: PROVIDER_NAMES[provider] };
+    const file = `users-export${extname(inputFile(provider))}`;
+    copyFileSync(inputFile(provider), join(root, file));
+    const ws = createWorkspace(root, agent, cfg, [join(root, file)], "import", claim.target);
+    const vars = { file, provider: platformName(provider) };
     const s = await runSession({
       agent, cfg, ws, access: "import", prompt: prompts.user(vars), system: prompts.system(vars), provider,
       label: `${agent} · ${provider} · ${set.name}`, answers, transcript,
@@ -155,8 +175,8 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
 
     result.calls = readCalls(ws);
     copyFileSync(ws.calls, join(dir, "clerk-calls.jsonl"));
-    const runs = agentRuns(ws.dir);
-    if (runs.length) cpSync(join(ws.dir, ".clerk", "migrate"), join(dir, "clerk-runs"), { recursive: true });
+    const runs = agentRuns(ws.dir, result.calls);
+    for (const r of runs) cpSync(r.dir, join(dir, "clerk-runs", r.id), { recursive: true });
     const imports = runs.filter((r) => r.kind === "import");
     result.importRuns = imports.map((r) => r.id);
     result.checks = processChecks(result.calls, result.qa, s.output, result.importRuns);
@@ -179,7 +199,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     result.error = error instanceof Error ? error.message : String(error);
     if (error instanceof SetupError) result.notRun = result.error;
   } finally {
-    result.seconds = Math.round((Date.now() - started) / 1000);
+    result.seconds = Math.round((Date.now() - started) / 1000) - waited(result.qa);
     rmSync(root, { recursive: true, force: true });
     // Whatever the agent did, the next run on this target starts empty.
     if (clerk) {
@@ -190,7 +210,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     }
     claim?.release();
   }
-  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS) : [];
+  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS, cfg.cli) : [];
   writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2));
   writeFileSync(join(dir, "result.md"), resultMarkdown(result, set, golden));
   return result;
@@ -225,7 +245,7 @@ function resultMarkdown(r: Result, set: AnswerSet, golden: GoldenKey): string {
   ];
   if (r.error) lines.push(`> **Run error:** ${r.error}`, "");
   if (r.contaminated.length) lines.push(`> **Contaminated:** the transcript mentions ${r.contaminated.map((m) => `\`${m}\``).join(", ")}.`, "");
-  for (const w of r.goldenWarnings) lines.push(`> ⚠ ${w}: run pnpm eval:imports:golden to refresh it.`, "");
+  for (const w of r.goldenWarnings) lines.push(`> ⚠ ${w}: run pnpm eval:setup:golden to refresh it.`, "");
   lines.push("## Process", "", ...r.checks.map((k) => `- ${k.ok ? "✅" : "❌"} **${k.name}:** ${k.detail}`), "");
   lines.push("## Every `clerk` call", "");
   lines.push(...(r.calls.length ? r.calls.map((k) => `- round ${k.round} · ${k.allowed ? `exit ${k.code}` : "**refused**"} · \`clerk ${k.args.replace(/\n/g, " ").slice(0, 200)}\``) : ["None."]), "");
@@ -250,7 +270,7 @@ function summaryMarkdown(results: Result[], meta: Record<string, string>): strin
       `${passed(r)} | ${c.set}/${c.fallback}/${c.you} | ${minutes(r.seconds)} | [result](${r.set}/${r.agent}/${r.provider}/result.md) | ${notes} |`;
   });
   return [
-    "# Import eval",
+    native ? "# Import eval: native exports" : "# Import eval",
     "",
     ...Object.entries(meta).map(([k, v]) => `- **${k}:** ${v}`),
     ...(versions.size > setNames.length ? ["", "> An answer set changed during this batch: answers were saved mid-run."] : []),

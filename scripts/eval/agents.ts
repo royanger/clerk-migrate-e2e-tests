@@ -157,7 +157,8 @@ function writeShim(ws: Workspace, cli: string, access: CliAccess, target?: Clerk
     // Everything a whole migration needs: export from the source, then import.
     migrate: `${sources} || [[ "$1 $2" == "migrate export" || "$1 $2" == "migrate import" || "$1 $2" == "migrate runs" || "$1 $2" == "config pull" || "$1 $2" == "config patch" || "$1 $2" == "config schema" || "$1 $2" == "users list" || "$1" == "doctor" ]]`,
   }[access];
-  const key = (access === "dry-run" || access === "import" || access === "migrate") && target ? `export CLERK_SECRET_KEY='${target.secretKey}'` : "";
+  // The target's key unless the agent set its own (a source key the customer gave it), as a real shell would.
+  const key = (access === "dry-run" || access === "import" || access === "migrate") && target ? `export CLERK_SECRET_KEY="\${CLERK_SECRET_KEY:-${target.secretKey}}"` : "";
   const account = linked ? `export CLERK_CONFIG_DIR='${ws.clerkConfig}'` : "";
   // Your login reaches every app in the account; the agent gets only the target.
   // ponytail: checks the first --app and --instance only; one call naming two is refused by the CLI anyway.
@@ -305,6 +306,22 @@ export function readCalls(ws: Workspace): ShimCall[] {
   });
 }
 
+export type AgentRun = { id: string; kind: string; created: number; dir: string };
+
+/** The agent's own CLI runs: the default store in its workspace, plus any `--runs-dir` it passed. */
+export function agentRuns(wsDir: string, calls: ShimCall[]): AgentRun[] {
+  const dirs = calls.flatMap((c) => c.args.match(/--runs-dir[ =]["']?([^\s"']+)/)?.[1] ?? []).map((d) => resolve(wsDir, d));
+  // Real paths: macOS's temp folder is /var to one process and /private/var to another.
+  return [...new Set([join(wsDir, ".clerk", "migrate"), ...dirs].filter((store) => existsSync(store)).map((store) => realpathSync(store)))]
+    .flatMap((store) => readdirSync(store).map((id) => join(store, id)))
+    .filter((dir) => existsSync(join(dir, "run.json")))
+    .map((dir) => {
+      const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8"));
+      return { id: basename(dir), kind: r.kind as string, created: Number(r.counts?.created ?? 0), dir };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 /** Tells the shim which question round the next turn is, for ordering its log. */
 export const setRound = (ws: Workspace, round: number) => writeFileSync(ws.roundFile, String(round));
 
@@ -335,7 +352,9 @@ export async function runTurn(
   // pnpm puts this repo's node_modules/.bin on PATH; that would hand the agent
   // the repo's location (and its tools), so only directories outside it pass.
   const path = (process.env.PATH ?? "").split(":").filter((d) => !d.startsWith(process.cwd())).join(":");
-  const env = { ...process.env, PATH: `${ws.bin}:${path}`, TMPDIR: ws.tmp };
+  // No CLERK_SECRET_KEY of yours: the shim must see only a key the agent set itself.
+  const { CLERK_SECRET_KEY: _, ...inherited } = process.env;
+  const env = { ...inherited, PATH: `${ws.bin}:${path}`, TMPDIR: ws.tmp };
   const started = Date.now();
   const timeoutMs = opts.timeoutMs ?? 15 * 60_000;
 

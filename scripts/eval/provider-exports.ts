@@ -3,14 +3,19 @@
  * seeded into each provider and exported with `clerk migrate export`, exactly
  * as a customer would get them.
  *
- *   pnpm eval:provider-exports              all seven
- *   pnpm eval:provider-exports -p supabase  one
+ *   pnpm eval:setup:provider-exports              all seven
+ *   pnpm eval:setup:provider-exports -p supabase  one
+ *
+ * Each export is recorded in <provider>.made-from.json: the eval users and
+ * variation it came from. Imports and migrations make a missing export, and
+ * offer to remake one whose record no longer matches (prepare.ts).
  *
  * Each export runs through test:migrate's export-only mode, using the
  * variation whose source setup takes the widest mix of users. Output:
  * data/provider-exports/<provider>.json (gitignored: the Firebase one carries
  * the project's password-hash key).
  */
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +38,17 @@ export const PROVIDER_NAMES: Record<string, string> = {
   firebase: "Firebase", supabase: "Supabase", workos: "WorkOS",
 };
 
+export const EVAL_USERS = "data/users-eval.json";
 export const exportFile = (provider: string) => `data/provider-exports/${provider}.json`;
+const madeFromFile = (provider: string) => `data/provider-exports/${provider}.made-from.json`;
+
+/** What an export is made from: the eval users and the variation. */
+const madeFrom = (provider: string) =>
+  JSON.stringify({ variation: PROVIDER_EXPORTS[provider], users: createHash("sha256").update(readFileSync(EVAL_USERS)).digest("hex") });
+
+/** True when the export has no record of what it was made from, or was made from something else. */
+export const exportStale = (provider: string) =>
+  !existsSync(madeFromFile(provider)) || readFileSync(madeFromFile(provider), "utf8").trim() !== madeFrom(provider);
 
 /**
  * Password formats a provider cannot hold at all. Those users get the
@@ -48,8 +63,8 @@ const EMAIL_REQUIRED = ["workos"];
 /** data/users-eval.json, adjusted for what `provider` can store. */
 export function usersFor(provider: string, dir: string): string {
   const drop = UNSUPPORTED_FORMATS[provider] ?? [];
-  if (!drop.length && !EMAIL_REQUIRED.includes(provider)) return "data/users-eval.json";
-  const seed = JSON.parse(readFileSync("data/users-eval.json", "utf8"));
+  if (!drop.length && !EMAIL_REQUIRED.includes(provider)) return EVAL_USERS;
+  const seed = JSON.parse(readFileSync(EVAL_USERS, "utf8"));
   for (const u of seed.users) if (drop.includes(u.passwordFormat)) delete u.passwordFormat;
   if (EMAIL_REQUIRED.includes(provider)) seed.users = seed.users.filter((u: { email: string | null }) => u.email);
   const file = join(dir, `users-${provider}.json`);
@@ -78,6 +93,7 @@ async function main() {
     const secs = Math.round((Date.now() - started) / 1000);
     const ok = r.code === 0 && existsSync(out);
     if (!ok) failed++;
+    else writeFileSync(madeFromFile(p), madeFrom(p) + "\n");
     const users = ok ? JSON.parse(readFileSync(out, "utf8")).users.length : 0;
     console.log(`${ok ? "✓" : "✗"} ${p.padEnd(12)} ${ok ? `${users} users → ${out}` : `exit ${r.code}`}  (${secs}s)`);
     if (!ok) console.log((r.stdout + r.stderr).trim().split("\n").slice(-6).map((l) => `    ${l}`).join("\n"));

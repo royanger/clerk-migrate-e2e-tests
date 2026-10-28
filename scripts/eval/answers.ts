@@ -12,7 +12,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } 
 import { join } from "node:path";
 import { hashTree } from "./config";
 
-export type EvalKind = "sources" | "imports" | "migrations";
+export type EvalKind = "sources" | "imports" | "imports-native" | "migrations";
 /** The folder holding one eval's answer sets. */
 export const setsDir = (kind: EvalKind) => join("evals/answer-sets", kind);
 

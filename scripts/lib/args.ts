@@ -37,6 +37,9 @@ export const FLAGS = {
   seedOnly: ["--seed-only"],
   restoreSource: ["--restore-source"],
   exportTo: ["--export-to"],
+  noSync: ["--no-sync"],
+  native: ["--native"],
+  done: ["--done"],
 } as const;
 
 type Name = keyof typeof FLAGS;

@@ -8,13 +8,16 @@
  * Deterministic: same users.json in, same file out. Phone-only users have no
  * password, as in users.json.
  *
- * Run: pnpm eval:users
+ * Run: pnpm eval:setup:users. Imports and migrations make the file when it is
+ * missing, and offer to remake it when it differs from what this writes now
+ * (prepare.ts writes a copy elsewhere with --out to compare).
  */
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import type { SeedUser } from "../lib/users";
+import { value } from "../lib/args";
 
-const OUT = "data/users-eval.json";
+const OUT = value("out") ?? "data/users-eval.json";
 const { seedPassword, users } = JSON.parse(readFileSync("data/users.json", "utf8")) as { seedPassword: string; users: SeedUser[] };
 
 const chosen: SeedUser[] = [];

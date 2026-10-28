@@ -5,11 +5,16 @@
  *   pnpm eval:sources --set clear-correct
  *   pnpm eval:sources --set clueless -a claude
  *   pnpm eval:sources --set mixed --agent-cli dry-run -a codex --exports gatekeep.csv,vaultrun.json
+ *   pnpm eval:sources                     every set, one batch each
  *
- *   --set <name>            answer set in evals/answer-sets/ (required)
+ *   --set <a[,b]>           answer sets in evals/answer-sets/sources/ (default: all of them)
  *   --agent-cli <level>     what the agent's `clerk` may run: none (default), sources, dry-run
  *   -a, --agent <a[,b]>     claude, codex, or both comma-separated (default: both, Claude first)
  *   --exports <a,b>         default: all 8
+ *   --prompt-dir <dir>      prompts other than evals/prompts (e.g. evals/prompts-first-person)
+ *   --no-sync               test evals/skill as it is, not synced from skillSource
+ *
+ * First, prepare.ts: skill sync and eval:ready.
  *
  * Per run (agent × export), in a temp workspace holding only the export and
  * the skill:
@@ -20,7 +25,8 @@
  * Each run's folder also holds test:custom's report (test-custom/) and the
  * CLI's own import and undo runs (clerk-runs/).
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "../lib/run";
@@ -31,23 +37,26 @@ import { value } from "../lib/args";
 import type { Grade } from "../lib/grade";
 import type { AnswerKey } from "../generate-custom-exports";
 import { claudeAccount, codexAccount, CLI_ACCESS, createWorkspace, type CliAccess, type TurnOutput } from "./agents";
-import { loadSet, loadTopics, setsDir } from "./answers";
+import { listSets, loadSet, loadTopics, setsDir } from "./answers";
 import { loadPrompts } from "./prompts";
-import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type QA } from "./session";
+import { answerer, contamination, counts, minutes, qaMarkdown, runSession, waited, type QA } from "./session";
 import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
+import { prepare } from "./prepare";
 
 const EXPORTS = ["keyhole", "passly", "gatekeep", "vaultrun", "frostline", "nimbus"].flatMap((n) => [`${n}.json`, `${n}.csv`]);
 /** Question rounds before the run is called stuck. */
 
 // ── arguments ──
 
-const usage = "Usage: pnpm eval:sources --set <name> [-a claude|codex] [--agent-cli none|sources|dry-run] [--exports a.json,b.csv]";
-const setName = value("set");
+const usage = "Usage: pnpm eval:sources [--set a,b] [-a claude|codex] [--agent-cli none|sources|dry-run] [--exports a.json,b.csv] [--prompt-dir <dir>] [--no-sync]";
+const SETS = setsDir("sources");
+const setNames = value("set")?.split(",") ?? listSets(SETS);
 const access = (value("agentCli") ?? "none") as CliAccess;
 const agents = (value("agents")?.split(",") ?? AGENTS) as AgentName[];
 const exports = value("exports")?.split(",") ?? EXPORTS;
 const bad = [
-  !setName && "--set is required",
+  !setNames.length && `no answer sets in ${SETS}`,
+  ...setNames.filter((s) => !listSets(SETS).includes(s)).map((s) => `unknown set "${s}" (have ${listSets(SETS).join(", ")})`),
   !CLI_ACCESS.includes(access) && `--agent-cli must be one of ${CLI_ACCESS.join(", ")}`,
   ...agents.filter((a) => !AGENTS.includes(a)).map((a) => `unknown agent "${a}"`),
   ...exports.filter((e) => !EXPORTS.includes(e)).map((e) => `unknown export "${e}" (have ${EXPORTS.join(" ")})`),
@@ -57,10 +66,29 @@ if (bad.length) {
   process.exit(2);
 }
 
+// Several sets: prepare once, then this script again per set, one after another.
+// ponytail: one batch folder and summary per set; fold into one batch if a combined summary is wanted.
+if (setNames.length > 1) {
+  await prepare(agents);
+  const i = process.argv.indexOf("--set");
+  const rest = process.argv.slice(2).filter((_, j) => i < 0 || (j !== i - 2 && j !== i - 1));
+  for (const [n, s] of setNames.entries()) {
+    console.log(`\n══ set ${s} (${n + 1}/${setNames.length}) ══\n`);
+    const code = await new Promise<number | null>((done) =>
+      spawn("tsx", [process.argv[1], ...rest, "--set", s], { stdio: "inherit", env: { ...process.env, EVAL_PREPARED: "1" } })
+        .on("error", () => done(1))
+        .on("close", done),
+    );
+    // A failed set or Ctrl-C (the child exits 130) stops the rest.
+    if (code !== 0) process.exit(code ?? 1);
+  }
+  process.exit(0);
+}
+
 const cfg = loadConfig();
-const SETS = setsDir("sources");
-const answers = answerer(loadSet(setName!, SETS), loadTopics(SETS));
+const answers = answerer(loadSet(setNames[0], SETS), loadTopics(SETS));
 const set = answers.set;
+if (!process.env.EVAL_PREPARED) await prepare(agents);
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
 const batchDir = resolve("evals/runs", `${stamp}-${set.name}`);
@@ -124,7 +152,8 @@ const gradeCell = (r: Result) =>
 function findSource(wsDir: string, named: string | null | undefined): string | undefined {
   if (named) {
     const p = isAbsolute(named) ? named : join(wsDir, named);
-    if (existsSync(p) && !relative(wsDir, p).startsWith("..")) return p;
+    // realpath both: on macOS the agent may report /private/var/… for a workspace under /var/….
+    if (existsSync(p) && !relative(realpathSync(wsDir), realpathSync(p)).startsWith("..")) return p;
   }
   return readdirSync(wsDir)
     .filter((f) => /\.(ts|js|mjs)$/.test(f))
@@ -175,11 +204,11 @@ async function runOne(agent: AgentName, exportName: string): Promise<Result> {
     result.issues.push(`runner: ${error instanceof Error ? error.message : String(error)}`);
     if (error instanceof SetupError) result.notRun = String(error.message);
   } finally {
-    result.seconds = Math.round((Date.now() - started) / 1000);
+    result.seconds = Math.round((Date.now() - started) / 1000) - waited(result.qa);
     rmSync(root, { recursive: true, force: true });
   }
 
-  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS) : [];
+  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS, cfg.cli) : [];
 
   // ── grade with test:custom ──
   // What the agent was never told (no answer, a fallback, or an "unknown" one) is graded as a note.

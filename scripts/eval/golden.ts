@@ -6,8 +6,9 @@
  *   <dest>[-partial][-reserved]   e.g. D2-partial: Clerk settings D2, --allow-partial;
  *                                 -reserved adds --reserve-unverified
  *
- *   pnpm eval:imports:golden              every settings combination any import/migration set uses × provider
- *   pnpm eval:imports:golden -p auth0     one provider
+ *   pnpm eval:setup:golden              every settings combination any import/migration set uses × provider
+ *   pnpm eval:setup:golden -p auth0     one provider
+ *   pnpm eval:setup:golden --native     the native exports (native-exports.ts), for the imports-native sets
  *
  * On one Clerk target claimed from the pool, per settings × provider: empty it → those Clerk settings →
  * `clerk migrate import --yes` (with --allow-partial and --reserve-unverified when they say so) →
@@ -17,14 +18,15 @@
  * same shape as the custom-source answer keys, so lib/grade.ts grades an
  * agent's import against it unchanged. Users the import rejected become
  * `skip` entries: they must not be in Clerk. Each key records the CLI build
- * it came from; eval:imports warns when the CLI has moved on since.
+ * it came from. Imports and migrations build a provider's keys when one is
+ * missing, and offer to rebuild them once the CLI or the export moves on (prepare.ts).
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { User } from "@clerk/backend";
-import { value } from "../lib/args";
+import { flag, value } from "../lib/args";
 import { rowIdentifiers, sourceIdOf } from "../lib/identifiers";
 import { clerkRun, cliVersion } from "../lib/clerk-run";
 import { claimTarget, targetArgs } from "../lib/targets";
@@ -33,6 +35,7 @@ import { DESTS, withBaseline, type DestId } from "../lib/clerk-dest";
 import type { AnswerKey, Expected } from "../generate-custom-exports";
 import { listSets, loadSet, setsDir, type AnswerSet } from "./answers";
 import { loadConfig } from "./config";
+import { firebaseHashEnv, nativeFile, nativeRows, NATIVE_EXPORTS } from "./native-exports";
 import { exportFile, PROVIDER_EXPORTS } from "./provider-exports";
 
 export type GoldenKey = AnswerKey & {
@@ -95,7 +98,8 @@ async function main() {
   const cfg = loadConfig();
   // One build per distinct settings combination across both evals' sets.
   const combos = new Map<string, { dest: DestId; allowPartial: boolean; reserveUnverified: boolean; usedBy: string[] }>();
-  for (const kind of ["imports", "migrations"] as const) {
+  const native = flag("native");
+  for (const kind of native ? (["imports-native"] as const) : (["imports", "migrations"] as const)) {
     for (const name of listSets(setsDir(kind))) {
       const set = loadSet(name, setsDir(kind));
       const key = settingsOf(set);
@@ -106,11 +110,22 @@ async function main() {
       combos.set(key, c);
     }
   }
-  const providers = value("provider") ? [value("provider")!] : Object.keys(PROVIDER_EXPORTS);
+  const only = value("provider");
+  // A native export has no envelope to name its source, and Firebase's hash parameters come from the console:
+  // both are passed as a customer would.
+  const inputs = native
+    ? Object.entries(NATIVE_EXPORTS).filter(([id, e]) => !only || only === id || only === e.provider).map(([id, e]) => ({
+        key: `native/${id}`, provider: e.provider, file: nativeFile(id), make: `pnpm eval:setup:native-exports -p ${e.provider}`,
+        args: ["--source", e.provider], env: () => (e.provider === "firebase" ? firebaseHashEnv() : {}), rows: () => nativeRows(id),
+      }))
+    : (only ? [only] : Object.keys(PROVIDER_EXPORTS)).map((p) => ({
+        key: p, provider: p, file: exportFile(p), make: `pnpm eval:setup:provider-exports -p ${p}`,
+        args: [] as string[], env: () => ({}), rows: () => JSON.parse(readFileSync(exportFile(p), "utf8")).users as Record<string, unknown>[],
+      }));
   const seedPassword = JSON.parse(readFileSync("data/users-eval.json", "utf8")).seedPassword as string;
   const work = mkdtempSync(join(tmpdir(), "eval-golden-"));
   // Any pool target will do: golden keys depend on the Clerk settings, which the build sets.
-  const { target: t, release } = await claimTarget("eval:imports:golden");
+  const { target: t, release } = await claimTarget("eval:setup:golden");
   const clerk = clerkRun({ cli: cfg.cli, secretKey: t.secretKey, log: join(work, "clerk.log") });
   const target = targetArgs(t);
   const patch = (body: object) => clerk.patchConfig(target, body);
@@ -123,23 +138,22 @@ async function main() {
       if (!DESTS[dest]) throw new Error(`${usedBy.join(", ")}: dest "${dest}" is not one of ${Object.keys(DESTS).join(" ")}`);
       console.log(`${settings} (used by ${usedBy.join(", ")})`);
       await patch(withBaseline(DESTS[dest]));
-      for (const provider of providers) {
-        const file = exportFile(provider);
-        const label = `${settings.padEnd(11)} ${provider.padEnd(12)}`;
+      for (const { key: name, provider, file, make, args, env, rows: readRows } of inputs) {
+        const label = `${settings.padEnd(11)} ${name.padEnd(12)}`;
         if (!existsSync(file)) {
-          console.log(`✗ ${label} no export: run pnpm eval:provider-exports -p ${provider}`);
+          console.log(`✗ ${label} no export: run ${make}`);
           failed++;
           continue;
         }
-        const runs = join(work, `${settings}-${provider}`);
+        const runs = join(work, `${settings}-${name.replace("/", "-")}`);
         let importRun: string | undefined;
         try {
           const existing = await clerk.settledCount();
           if (existing) throw new Error(`instance ${t.name}: ${t.app} ${t.instance} already has ${existing} users: run pnpm teardown`);
           const imp = await clerk.cli([
             "migrate", "import", file, "--yes", "--json", ...(allowPartial ? ["--allow-partial"] : []),
-            ...(reserveUnverified ? ["--reserve-unverified"] : []), ...target, "--runs-dir", runs,
-          ]);
+            ...(reserveUnverified ? ["--reserve-unverified"] : []), ...args, ...target, "--runs-dir", runs,
+          ], env());
           importRun = imp.json?.run?.id;
           if (!imp.json?.result) throw new Error(`import exited ${imp.code}: ${JSON.stringify(imp.json?.error ?? imp.json).slice(0, 300)}`);
           const created = imp.json.result.created as number;
@@ -152,7 +166,10 @@ async function main() {
           const pw = await clerk.verifyPasswords(users, seedPassword);
           const bad = new Set(pw.failed);
           const lines = runUsers(join(runs, importRun!, "users.ndjson"));
-          const rows = new Map((JSON.parse(readFileSync(file, "utf8")).users as Record<string, unknown>[]).map((r) => [sourceIdOf(r), r]));
+          // A 5xx is Clerk having a bad moment, not an outcome the key should expect: build this key again.
+          const flaky = [...lines].filter(([, l]) => /"status":\s*5\d\d\b|\b5\d\d\b.*(gateway|server error|unavailable|timeout)/i.test(l.error ?? ""));
+          if (flaky.length) throw new Error(`server error for ${flaky.map(([id]) => id).join(", ")}; run it again`);
+          const rows = new Map(readRows().map((r) => [sourceIdOf(r), r]));
           const key: GoldenKey = {
             source: provider,
             seedPassword,
@@ -169,8 +186,8 @@ async function main() {
               ...[...lines].filter(([, l]) => l.status !== "created").map(([id, l]) => skipped(id, l.reason ?? l.error ?? l.status, rowIdentifiers(rows.get(id)))),
             ],
           };
-          mkdirSync(dirname(goldenFile(settings, provider)), { recursive: true });
-          writeFileSync(goldenFile(settings, provider), JSON.stringify(key, null, 2) + "\n");
+          mkdirSync(dirname(goldenFile(settings, name)), { recursive: true });
+          writeFileSync(goldenFile(settings, name), JSON.stringify(key, null, 2) + "\n");
           const unverifiable = users.filter((u) => u.passwordEnabled && bad.has(u.id)).length;
           console.log(`✓ ${label} ${created} created, ${key.users.length - users.length} skipped, ${pw.checked - pw.failed.length}/${pw.checked} passwords sign in` +
             (unverifiable ? `  ⚠ ${unverifiable} have a password that does not sign in` : ""));

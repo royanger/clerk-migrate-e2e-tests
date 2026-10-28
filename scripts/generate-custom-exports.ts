@@ -35,6 +35,7 @@ import { createHash, pbkdf2Sync } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { faker } from "@faker-js/faker";
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
+import { toCsv } from "./lib/csv";
 import { EUROPEAN_FORMATS, europeanNumber } from "./lib/phones";
 
 /** The password every seeded user has. Read, not imported: generate-users.ts runs on import. */
@@ -249,15 +250,6 @@ const django = () => {
 
 // ── output helpers ──
 
-function csv(rows: Record<string, unknown>[]): string {
-  const cols = [...new Set(rows.flatMap(Object.keys))];
-  const cell = (v: unknown) => {
-    const s = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [cols.join(","), ...rows.map((r) => cols.map((c) => cell(r[c])).join(","))].join("\n") + "\n";
-}
-
 const orNull = (o: Record<string, unknown>) => (Object.keys(o).length ? o : null);
 
 function expected(u: Canon, externalId: string): Expected {
@@ -284,7 +276,7 @@ function expected(u: Canon, externalId: string): Expected {
 
 function write(name: string, placement: AnswerKey["metadataPlacement"], json: unknown, rows: Record<string, unknown>[], answers: Expected[], sensitive: string[]) {
   writeFileSync(`${OUT}/${name}.json`, JSON.stringify(json, null, 2) + "\n");
-  writeFileSync(`${OUT}/${name}.csv`, csv(rows));
+  writeFileSync(`${OUT}/${name}.csv`, toCsv(rows));
   const key: AnswerKey = { source: name, seedPassword: SEED_PASSWORD, metadataPlacement: placement, sensitive, users: answers };
   writeFileSync(`${ANSWERS}/${name}.expected.json`, JSON.stringify(key, null, 2) + "\n");
   const live = answers.filter((a) => !a.skip).length;

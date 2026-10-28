@@ -21,7 +21,12 @@ export type QA = {
   answer: string;
   by: "set" | "fallback" | "you";
   tags: string[];
+  /** Seconds spent waiting at the terminal for a "you" answer. */
+  waited?: number;
 };
+
+/** A run's time at the terminal, which its minutes leave out. */
+export const waited = (qa: QA[]) => qa.reduce((n, q) => n + (q.waited ?? 0), 0);
 
 const tty = process.stdin.isTTY;
 /** Opens the terminal only while asking, so keys pressed during a run are not swallowed into an answer. */
@@ -81,10 +86,10 @@ export function answerer(initial: AnswerSet, topics: Record<string, string>) {
         }
         console.log(`\n── Question from ${label} · round ${round} ──\n${question}`);
         console.log(`(set "${set.name}" has no answer${matched[i].length ? ` for ${matched[i].join(", ")}` : ""})`);
+        const asked = Date.now();
         const text = (await ask("Your answer: ")).trim() || "I don't know.";
-        out.push({ round, question, topics: matched[i], by: "you", answer: text, tags: [] });
-
         const save = (await ask(`Save to set "${set.name}" for ${provider}? [y/N] `)).trim().toLowerCase();
+        out.push({ round, question, topics: matched[i], by: "you", answer: text, tags: [], waited: Math.round((Date.now() - asked) / 1000) });
         if (save === "y" || save === "yes") {
           const version = saveAnswer(set, provider, text);
           set = loadSet(set.name, set.dir);
@@ -190,8 +195,10 @@ export async function runSession(opts: {
 }
 
 /** Anything in a transcript pointing at the answers, or at this repo at all. */
-export function contamination(transcript: string, markers: string[]): string[] {
-  return [process.cwd(), ...markers].filter((m) => transcript.includes(m));
+export function contamination(transcript: string, markers: string[], cli: string): string[] {
+  // The pinned CLI bundle lives in the batch folder, so its own stack traces would match.
+  const t = transcript.replaceAll(cli, "");
+  return [process.cwd(), ...markers].filter((m) => t.includes(m));
 }
 
 export const minutes = (s: number) => `${(s / 60).toFixed(1)}`;

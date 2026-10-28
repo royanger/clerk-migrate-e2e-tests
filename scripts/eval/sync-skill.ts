@@ -1,9 +1,9 @@
 /**
  * Copies the skill from `skillSource` (evals/config.json) over the saved copy
- * in evals/skill/, and lists what changed.
+ * in evals/skill/, and lists what changed. Every eval runs it first (prepare.ts).
  *
- *   pnpm eval:sync-skill          copy
- *   pnpm eval:sync-skill -n       show what would change, copy nothing
+ *   pnpm eval:setup:sync-skill          copy
+ *   pnpm eval:setup:sync-skill -n       show what would change, copy nothing
  */
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { flag } from "../lib/args";

@@ -20,7 +20,7 @@ export type EvalConfig = {
   agents: Record<AgentName, { model: string; effort: string }>;
 };
 
-/** Where evals read the skill from. `pnpm eval:sync-skill` refreshes it from `skillSource`. */
+/** Where evals read the skill from. `pnpm eval:setup:sync-skill` (run by every eval) refreshes it from `skillSource`. */
 export const SKILL_DIR = "evals/skill/clerk-migrate";
 
 const expand = (p: string) => p.replace(/^~(?=\/|$)/, homedir());
@@ -51,7 +51,7 @@ export function readTree(dir: string): Map<string, Buffer> {
 /**
  * The saved skill's hash, checked against `skillSource` before a batch. A
  * missing source stops it: the batch would test a copy nothing keeps current.
- * A saved copy that differs only warns, since that can be a proposal under test.
+ * A saved copy that differs only warns: with --no-sync it can be a proposal under test.
  */
 export function checkedSkillHash(cfg: EvalConfig): string {
   const saved = hashTree(SKILL_DIR);
@@ -60,7 +60,7 @@ export function checkedSkillHash(cfg: EvalConfig): string {
     process.exit(2);
   }
   if (hashTree(cfg.skillSource) !== saved)
-    console.warn(`⚠ ${SKILL_DIR} (${saved}) differs from skillSource: run pnpm eval:sync-skill to test the current skill`);
+    console.warn(`⚠ ${SKILL_DIR} (${saved}) differs from skillSource: drop --no-sync to test the current skill`);
   return saved;
 }
 

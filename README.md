@@ -28,14 +28,22 @@ failing on it.
 ### Evals: start here
 
 ```sh
-pnpm eval:ready                         # agents signed in and isolated; all 8 Clerk instances reachable
 pnpm eval:sources --set clear-correct   # write a custom source: 12 exports × 2 agents
 pnpm eval:imports -a claude             # import a provider's export: 2 sets × 7 providers
 pnpm eval:migrations -a claude          # export from a live provider, then import: 2 sets × 7 providers
 ```
 
-Run `eval:ready` first. It shows which account each agent uses, and fails on a
-missing key, an agent that isn't isolated, or one Clerk instance in two roles.
+Each eval prepares itself first (`scripts/eval/prepare.ts`):
+
+1. Syncs the skill from `skillSource`. Pass `--no-sync` to test an edit to `evals/skill/` instead.
+2. Runs `eval:ready` for the batch's agents. It shows which account each agent uses, and fails on a
+   missing key, an agent that isn't isolated, or one Clerk instance in two roles.
+3. Imports and migrations only: checks the eval users, each provider's export and each golden key, in that
+   order. A missing one is built. An out-of-date one is rebuilt only if you answer yes; no keeps it and the
+   eval goes on.
+   - users: `data/users-eval.json` differs from what `eval:setup:users` makes from `data/users.json` now
+   - export: made from other eval users or another variation (`<provider>.made-from.json`)
+   - golden key: made with another CLI build, or from another export
 
 ### Commands
 
@@ -75,21 +83,21 @@ missing key, an agent that isn't isolated, or one Clerk instance in two roles.
 | `pnpm test:custom -e <export> -s <source.ts>` | import one export through a custom source and grade it |
 | `pnpm test:custom --all --sources-dir <dir>` | the same for all 8 exports |
 
-**Evals: setup** (once, or when the input changes)
+**Evals: setup** (the evals run these when needed; run one by hand to force it)
 
 | | |
 |---|---|
 | `pnpm eval:ready` | check agents, accounts, isolation, the 8 Clerk instances and the credentials answer sets hand out |
-| `pnpm eval:sync-skill` | copy the clerk-migrate skill from `skillSource` into `evals/skill/` (`-n` previews) |
-| `pnpm eval:users` | write `data/users-eval.json`: 50 users covering every edge case |
-| `pnpm eval:provider-exports` | seed those users into each provider and save its CLI export |
-| `pnpm eval:imports:golden` | build the answer keys imports and migrations are graded against |
+| `pnpm eval:setup:sync-skill` | copy the clerk-migrate skill from `skillSource` into `evals/skill/` (`-n` previews) |
+| `pnpm eval:setup:users` | write `data/users-eval.json`: 50 users covering every edge case |
+| `pnpm eval:setup:provider-exports` | seed those users into each provider and save its CLI export |
+| `pnpm eval:setup:golden` | build the answer keys imports and migrations are graded against |
 
 **Evals: run**
 
 | | |
 |---|---|
-| `pnpm eval:sources --set <name>` | each agent writes a source for the 8 made-up exports ([Source evals](#source-evals)) |
+| `pnpm eval:sources` | each agent writes a source for the made-up exports, for every answer set or `--set a,b` ([Source evals](#source-evals)) |
 | `pnpm eval:imports` | each agent imports each provider's export ([Import evals](#import-evals)) |
 | `pnpm eval:migrations` | each agent hears "I want to migrate from Auth0 to Clerk" and does the lot ([Migration evals](#migration-evals)) |
 
@@ -571,6 +579,7 @@ outside its workspace, and this shows if it did.
 pnpm eval:sources --set clear-correct                    both agents, all 12 exports
 pnpm eval:sources --set clueless -a claude               one agent
 pnpm eval:sources --set mixed --agent-cli dry-run -a codex --exports gatekeep.csv
+pnpm eval:sources                                        every set, one batch folder each
 ```
 
 `test:custom` grades each source the agent writes, on the same Clerk target the
@@ -581,9 +590,6 @@ run claimed. `--agent-cli` sets what the agent may check its work with:
 ### Import evals
 
 ```sh
-pnpm eval:users              once: data/users-eval.json
-pnpm eval:provider-exports   when the eval users change: data/provider-exports/<provider>.json
-pnpm eval:imports:golden     when the CLI changes: the answer keys
 pnpm eval:imports -a claude
 pnpm eval:imports --set strict -a codex -p firebase,supabase
 ```
@@ -605,8 +611,29 @@ to it field by field, then runs process checks on the shim's call log:
 
 Golden keys live in `data/provider-exports/golden/<settings>/` (gitignored),
 filed by Clerk settings (`D2-partial`), not by answer set. A key records the
-CLI build that made it, and runs warn once the CLI moves on: rebuild with
-`pnpm eval:imports:golden`.
+CLI build that made it and the export it came from; imports and migrations
+offer to rebuild a provider's keys once either moves on.
+
+**Native exports.** `--native` swaps `clerk migrate export`'s files for the
+ones each provider's own docs produce, with the `imports-native` answer sets.
+Only providers whose documented export differs from the CLI's have one:
+
+| Export | Made with | File |
+|---|---|---|
+| `auth0` | bulk export job, default fields, unzipped | NDJSON |
+| `firebase`, `firebase-csv` | `firebase auth:export`, plus the console's hash config | JSON, header-less CSV |
+| `supabase` | `select * from auth.users`, as the SQL Editor's CSV export | CSV |
+| `clerk` | Dashboard → Settings → User exports, downloaded by hand | CSV |
+
+```sh
+pnpm eval:setup:native-exports                  # auth0, firebase, supabase
+pnpm eval:setup:native-exports -p clerk         # seeds the source app; then export from the Dashboard
+pnpm eval:setup:native-exports -p clerk --done  # records your download, restores the source
+pnpm eval:setup:golden --native
+pnpm eval:imports --native --prompt-dir evals/prompts-first-person
+```
+
+Neither step runs on its own before a batch: the Clerk file needs you.
 
 ### Migration evals
 

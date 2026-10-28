@@ -1,5 +1,5 @@
 {
-  "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli-slice-6/packages/cli-core/src/cli.ts",
+  "cli": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/cli-final-slice/packages/cli-core/src/cli.ts",
   "skillSource": "~/clerk/clk/.clk/features/integrate-migration-tool-into-cli/skills/skills/clerk-migrate/",
   "prompts": "evals/prompts",
   "agents": {
@@ -8,7 +8,7 @@
       "effort": "high"
     },
     "codex": {
-      "model": "gpt-5.6-sol",
+      "model": "gpt-6.1-sol",
       "effort": "high"
     }
   }

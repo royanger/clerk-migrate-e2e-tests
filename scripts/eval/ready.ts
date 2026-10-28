@@ -2,27 +2,32 @@
  * Readiness check before an eval: is everything signed in, as the right
  * account, and do the exact flags the eval uses still work?
  *
- *   pnpm eval:ready
+ *   pnpm eval:ready              both agents
+ *   pnpm eval:ready -a claude    one (the evals pass theirs)
  *
  * Each agent gets a real first turn and a resumed turn, with the model,
  * effort and flags from evals/config.json. Neither CLI has a dry-run mode,
  * and a turn that changes no files is the nearest thing. The first turn also
  * reports which skills the agent can see, which proves the isolation: none of
  * the user's global skills may appear.
+ *
+ * Every eval runs it first, for its own agents (prepare.ts).
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClerkClient } from "@clerk/backend";
 import { run } from "../lib/run";
+import { value } from "../lib/args";
 import { DEST_KEYS, EVAL_BASELINE } from "../lib/clerk-dest";
 import { clerkLock, holderOf } from "../lib/lock";
 import { resolveTarget, sharedInstances, targetArgs, targetSpecs, type ClerkTarget } from "../lib/targets";
 import { claudeAccount, codexAccount, createWorkspace, runTurn } from "./agents";
-import { AGENTS, cliArgv, hashTree, loadConfig, SKILL_DIR } from "./config";
+import { AGENTS, cliArgv, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 import { envRefs, listSets, loadSet, setsDir } from "./answers";
 
 const cfg = loadConfig();
+const agents = (value("agents")?.split(",") ?? AGENTS) as AgentName[];
 let failed = 0;
 const line = (ok: boolean | "warn", what: string, detail: string) => {
   if (ok === false) failed++;
@@ -30,7 +35,7 @@ const line = (ok: boolean | "warn", what: string, detail: string) => {
 };
 
 // ── 1. accounts ──
-for (const [name, check] of [["claude", claudeAccount], ["codex", codexAccount]] as const) {
+for (const [name, check] of ([["claude", claudeAccount], ["codex", codexAccount]] as const).filter(([n]) => agents.includes(n))) {
   const a = await check().catch((e: Error) => ({ ok: false, version: "?", detail: e.message }));
   line(a.ok, name, `${a.version} · ${a.detail}`);
 }
@@ -43,12 +48,12 @@ line(cli.code === 0, "cli", `${cfg.cli}${cli.code === 0 ? "" : ` → exit ${cli.
 
 // ── 3. the saved skill ──
 const saved = hashTree(SKILL_DIR);
-if (!existsSync(join(SKILL_DIR, "SKILL.md"))) line(false, "skill", `no ${SKILL_DIR}/SKILL.md: run pnpm eval:sync-skill`);
+if (!existsSync(join(SKILL_DIR, "SKILL.md"))) line(false, "skill", `no ${SKILL_DIR}/SKILL.md: run pnpm eval:setup:sync-skill`);
 // A missing source fails: the batch would test the saved copy, which nothing keeps current.
 else if (!existsSync(cfg.skillSource)) line(false, "skill", `${saved} · skillSource ${cfg.skillSource} not found: fix it in evals/config.json`);
 else {
   const source = hashTree(cfg.skillSource);
-  line(source === saved ? true : "warn", "skill", source === saved ? `${saved} · in sync with skillSource` : `${saved} · skillSource is ${source}: run pnpm eval:sync-skill to update`);
+  line(source === saved ? true : "warn", "skill", source === saved ? `${saved} · in sync with skillSource` : `${saved} · skillSource is ${source}: run pnpm eval:setup:sync-skill to update`);
 }
 
 // ── 4. the Clerk instances (evals/targets.json) ──
@@ -134,7 +139,7 @@ const userSkills = (agent: string) =>
 const PROBE =
   "Readiness check: do not use any tools. Reply with status \"done\", questions [], sourceFile null, " +
   "and in issues the exact names of every skill available to you, one per item.";
-for (const agent of AGENTS) {
+for (const agent of agents) {
   const { model, effort } = cfg.agents[agent];
   const label = `${agent} turn`;
   const root = mkdtempSync(join(tmpdir(), `eval-ready-${agent}-`));

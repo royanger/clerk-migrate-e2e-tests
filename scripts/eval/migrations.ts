@@ -3,13 +3,16 @@
  * clerk-migrate skill and the Clerk CLI, does the agent get the users out of
  * the provider and into Clerk the way the skill says?
  *
- *   pnpm eval:ready && pnpm eval:migrations -a claude
+ *   pnpm eval:migrations -a claude
  *   pnpm eval:migrations --set strict -a codex -p supabase,workos
  *
  *   --set <a[,b]>           import answer sets (default: all); they also hold each provider's credentials
  *   -a, --agent <a[,b]>     claude, codex (default: both, Claude first)
  *   -p, --provider <a[,b]>  default: all seven (Clerk needs the source instance in evals/targets.json)
  *   --prompt-dir <dir>      prompts other than evals/prompts
+ *   --no-sync               test evals/skill as it is, not synced from skillSource
+ *
+ * First, prepare.ts: skill sync, eval:ready, and any missing export or missing/stale golden key.
  *
  * Providers are worked through under their locks, skipping any another run
  * holds and coming back to it (scripts/lib/lock.ts schedule: 5-min polls,
@@ -40,7 +43,7 @@ import { grade, section, type Grade } from "../lib/grade";
 import { rowIdentifiers, sourceIdOf } from "../lib/identifiers";
 import { clerkLock, schedule } from "../lib/lock";
 import { run } from "../lib/run";
-import { claudeAccount, codexAccount, createWorkspace, readCalls, type ShimCall } from "./agents";
+import { agentRuns, claudeAccount, codexAccount, createWorkspace, readCalls, type AgentRun, type ShimCall } from "./agents";
 import { envRefs, listSets, loadSet, loadTopics, setsDir, type AnswerSet } from "./answers";
 import { AGENTS, checkedSkillHash, hashTree, loadConfig, SKILL_DIR, type AgentName } from "./config";
 import { agentFiles, CLI_SOURCE, exportChecks, type ExportRun } from "./export-checks";
@@ -48,7 +51,8 @@ import { goldenFile, settingsOf, runUsers, type GoldenKey } from "./golden";
 import { processChecks, type Check } from "./process-checks";
 import { loadPrompts } from "./prompts";
 import { exportFile, PROVIDER_EXPORTS, PROVIDER_NAMES, usersFor } from "./provider-exports";
-import { answerer, contamination, counts, minutes, qaMarkdown, runSession, type Answerer, type QA } from "./session";
+import { prepare } from "./prepare";
+import { answerer, contamination, counts, minutes, qaMarkdown, runSession, waited, type Answerer, type QA } from "./session";
 
 const SETS = setsDir("migrations");
 const PROVIDERS = Object.keys(CLI_SOURCE);
@@ -57,7 +61,7 @@ const MARKERS = ["provider-exports", "golden", "answer-sets", "evals/runs", "use
 
 // ── arguments ──
 
-const usage = "Usage: pnpm eval:migrations [--set permissive,strict] [-a claude|codex] [-p auth0,supabase] [--prompt-dir <dir>]";
+const usage = "Usage: pnpm eval:migrations [--set permissive,strict] [-a claude|codex] [-p auth0,supabase] [--prompt-dir <dir>] [--no-sync]";
 const setNames = value("set")?.split(",") ?? listSets(SETS);
 const agents = (value("agents")?.split(",") ?? AGENTS) as AgentName[];
 const providers = value("provider")?.split(",") ?? PROVIDERS;
@@ -65,8 +69,6 @@ const bad = [
   ...setNames.filter((s) => !listSets(SETS).includes(s)).map((s) => `unknown set "${s}" (have ${listSets(SETS).join(", ")})`),
   ...agents.filter((a) => !AGENTS.includes(a)).map((a) => `unknown agent "${a}"`),
   ...providers.filter((p) => !PROVIDERS.includes(p)).map((p) => `unknown provider "${p}" (have ${PROVIDERS.join(" ")})`),
-  ...providers.filter((p) => !existsSync(exportFile(p))).map((p) => `no reference export for ${p}: run pnpm eval:provider-exports -p ${p}`),
-  ...setNames.filter((s) => listSets(SETS).includes(s)).flatMap((s) => providers.filter((p) => !existsSync(goldenFile(settingsOf(loadSet(s, SETS)), p))).map((p) => `no golden key for ${s}/${p}: run pnpm eval:imports:golden -p ${p}`)),
 ];
 if (bad.length) {
   console.error(`${bad.join("\n")}\n${usage}`);
@@ -96,6 +98,7 @@ if (missingEnv.length) {
   console.error(`Not set: ${missingEnv.join(", ")}. Run through op (pnpm eval:migrations does) and check op.env.`);
   process.exit(2);
 }
+await prepare(agents, { providers, settings: sets.map(settingsOf) });
 /** How the customer names where they are coming from: "I want to migrate from <this> to Clerk." */
 const FROM: Record<string, string> = { ...PROVIDER_NAMES, clerk: "another Clerk application" };
 
@@ -152,19 +155,6 @@ type Result = {
   target?: string;
 };
 
-type AgentRun = { id: string; kind: string; created: number; dir: string };
-function agentRuns(wsDir: string): AgentRun[] {
-  const store = join(wsDir, ".clerk", "migrate");
-  if (!existsSync(store)) return [];
-  return readdirSync(store)
-    .filter((id) => existsSync(join(store, id, "run.json")))
-    .map((id) => {
-      const r = JSON.parse(readFileSync(join(store, id, "run.json"), "utf8"));
-      return { id, kind: r.kind as string, created: Number(r.counts?.created ?? 0), dir: join(store, id) };
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-}
-
 function readExport(r: AgentRun): ExportRun | undefined {
   const f = readdirSync(r.dir).find((n) => n.endsWith(".json") && n !== "run.json");
   if (!f) return undefined;
@@ -210,8 +200,8 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
 
     result.calls = readCalls(ws);
     if (existsSync(ws.calls)) cpSync(ws.calls, join(dir, "clerk-calls.jsonl"));
-    const runs = agentRuns(ws.dir);
-    if (runs.length) cpSync(join(ws.dir, ".clerk", "migrate"), join(dir, "clerk-runs"), { recursive: true });
+    const runs = agentRuns(ws.dir, result.calls);
+    for (const r of runs) cpSync(r.dir, join(dir, "clerk-runs", r.id), { recursive: true });
     const exports = runs.filter((r) => r.kind === "export");
     const imports = runs.filter((r) => r.kind === "import");
     result.exportRuns = exports.map((r) => r.id);
@@ -257,7 +247,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     result.error = error instanceof Error ? error.message : String(error);
     if (error instanceof SetupError) result.notRun = result.error;
   } finally {
-    result.seconds = Math.round((Date.now() - started) / 1000);
+    result.seconds = Math.round((Date.now() - started) / 1000) - waited(result.qa);
     rmSync(root, { recursive: true, force: true });
     for (const p of outside) rmSync(p, { force: true });
     if (clerk) {
@@ -268,7 +258,7 @@ async function runOne(set: AnswerSet, answers: Answerer, agent: AgentName, provi
     }
     claim?.release();
   }
-  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS) : [];
+  result.contaminated = existsSync(transcript) ? contamination(readFileSync(transcript, "utf8"), MARKERS, cfg.cli) : [];
   writeFileSync(join(dir, "result.json"), JSON.stringify(redacted(result), null, 2));
   writeFileSync(join(dir, "result.md"), resultMarkdown(result, set, golden));
   return result;
@@ -305,7 +295,7 @@ function resultMarkdown(r: Result, set: AnswerSet, golden: GoldenKey): string {
   ];
   if (r.error) lines.push(`> **Run error:** ${r.error}`, "");
   if (r.contaminated.length) lines.push(`> **Contaminated:** the transcript mentions ${r.contaminated.map((m) => `\`${m}\``).join(", ")}.`, "");
-  for (const w of r.goldenWarnings) lines.push(`> ⚠ ${w}: run pnpm eval:imports:golden to refresh it.`, "");
+  for (const w of r.goldenWarnings) lines.push(`> ⚠ ${w}: run pnpm eval:setup:golden to refresh it.`, "");
   lines.push("## Export", "", ...checkList(r.exportChecks), "");
   lines.push("## Import process", "", ...checkList(r.checks), "");
   lines.push("## Every `clerk` call", "");

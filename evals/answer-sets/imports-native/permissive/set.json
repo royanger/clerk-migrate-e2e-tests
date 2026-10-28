@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "description": "Everything on, nothing required (D1). Importing a file from the provider's own export tool. A customer who wants it done: yes to importing, no to changing settings.",
+  "fallback": "ask-human",
+  "dest": "D1",
+  "allowPartial": true
+}
